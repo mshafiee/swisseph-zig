@@ -1,0 +1,27 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  ci:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v1
+        with: { version: "0.16.0" }
+      - name: Format check
+        run: zig fmt --check src/ examples/ test/
+      - name: Unit tests
+        run: zig build test
+      - name: Build (native)
+        run: zig build -Doptimize=ReleaseFast
+      - name: Smoke test
+        run: ./zig-out/bin/swetest -b1.1.2000 -p0 -fPLBRS -g, -head
+      - name: Cross-build smoke
+        run: |
+          zig build libswe -Dtarget=aarch64-linux -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=x86_64-windows -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast

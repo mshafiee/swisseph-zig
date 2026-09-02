@@ -1,0 +1,166 @@
+const std = @import("std");
+
+fn mkmod(b: *std.Build, bo: *std.Build.Step.Options, name: []const u8, path: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
+    const m = b.addModule(name, .{
+        .root_source_file = b.path(path),
+        .target = target,
+        .optimize = optimize,
+    });
+    m.addOptions("build_options", bo);
+    return m;
+}
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const isWasm = target.result.cpu.arch.isWasm();
+    const isShimOK = !isWasm and target.result.os.tag != .windows;
+    const pure_opt = b.option(bool, "pure", "pure Zig: std.math instead of libm shim");
+    const pure = if (isShimOK) (pure_opt orelse false) else true;
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "pure", pure);
+    build_options.addOption(bool, "is_wasm", isWasm);
+
+    // ── Named modules per the dependency DAG (spec §1) ──────────────────────
+    // leaves
+    const swedate = mkmod(b, build_options, "swedate", "src/swedate.zig", target, optimize);
+    const deltat = mkmod(b, build_options, "deltat", "src/deltat.zig", target, optimize);
+    // foundation
+    const swephlib = mkmod(b, build_options, "swephlib", "src/swephlib.zig", target, optimize);
+    // ephemeris
+    const swemmoon = mkmod(b, build_options, "swemmoon", "src/swemmoon.zig", target, optimize);
+    const swemplan = mkmod(b, build_options, "swemplan", "src/swemplan.zig", target, optimize);
+    const swejpl = mkmod(b, build_options, "swejpl", "src/swejpl.zig", target, optimize);
+    // engine
+    const sweph = mkmod(b, build_options, "sweph", "src/sweph.zig", target, optimize);
+    // consumers
+    const swecl = mkmod(b, build_options, "swecl", "src/swecl.zig", target, optimize);
+    const swehouse = mkmod(b, build_options, "swehouse", "src/swehouse.zig", target, optimize);
+    const swehel = mkmod(b, build_options, "swehel", "src/swehel.zig", target, optimize);
+
+    // Wire inter-module deps (empirically-mapped full graph)
+    // leaves: swedate (no deps)
+    deltat.addImport("swephlib", swephlib);
+    // foundation: swephlib → deltat, swedate
+    swephlib.addImport("deltat", deltat);
+    swephlib.addImport("swedate", swedate);
+    // ephemeris
+    swemmoon.addImport("swephlib", swephlib);
+    swemplan.addImport("swephlib", swephlib);
+    swemplan.addImport("sweph", sweph);
+    swejpl.addImport("swephlib", swephlib);
+    swejpl.addImport("sweph", sweph);
+    // engine: sweph → everything below
+    sweph.addImport("swephlib", swephlib);
+    sweph.addImport("deltat", deltat);
+    sweph.addImport("swemmoon", swemmoon);
+    sweph.addImport("swemplan", swemplan);
+    sweph.addImport("swejpl", swejpl);
+    sweph.addImport("swehouse", swehouse);
+    // consumers
+    swecl.addImport("sweph", sweph);
+    swecl.addImport("swephlib", swephlib);
+    swecl.addImport("deltat", deltat);
+    swecl.addImport("swemmoon", swemmoon);
+    swecl.addImport("swehouse", swehouse);
+    swehouse.addImport("swephlib", swephlib);
+    swehel.addImport("sweph", sweph);
+    swehel.addImport("swecl", swecl);
+    swehel.addImport("swephlib", swephlib);
+    swehel.addImport("deltat", deltat);
+    swehel.addImport("swedate", swedate);
+
+    // ── libswe (C ABI) ──────────────────────────────────────────────────────
+    const swe_abi = mkmod(b, build_options, "swe_abi", "src/swe_abi.zig", target, optimize);
+    swe_abi.addImport("sweph", sweph);
+    swe_abi.addImport("swephlib", swephlib);
+    swe_abi.addImport("deltat", deltat);
+    swe_abi.addImport("swedate", swedate);
+    swe_abi.addImport("swecl", swecl);
+    swe_abi.addImport("swehouse", swehouse);
+    swe_abi.addImport("swehel", swehel);
+    swe_abi.addImport("swemplan", swemplan);
+    swe_abi.addImport("swejpl", swejpl);
+    swe_abi.addImport("swephlib", swephlib);
+    swe_abi.addImport("deltat", deltat);
+    swe_abi.addImport("swecl", swecl);
+    swe_abi.addImport("swehouse", swehouse);
+    swe_abi.addImport("swemplan", swemplan);
+    swe_abi.addImport("swejpl", swejpl);
+    if (isShimOK and !pure) {
+        swe_abi.addCSourceFile(.{ .file = b.path("src/libmshim.c"), .flags = &.{} });
+    }
+    if (!isWasm) swe_abi.link_libc = true;
+
+    const libswe_static = b.addLibrary(.{
+        .name = "swe",
+        .root_module = swe_abi,
+        .linkage = .static,
+    });
+    b.installArtifact(libswe_static);
+    var libswe_shared: ?*std.Build.Step.Compile = null;
+    if (!isWasm) {
+        libswe_shared = b.addLibrary(.{
+            .name = "swe",
+            .root_module = swe_abi,
+            .linkage = .dynamic,
+        });
+        b.installArtifact(libswe_shared.?);
+    }
+
+    const libswe_step = b.step("libswe", "libswe static+shared only");
+    libswe_step.dependOn(&libswe_static.step);
+    if (libswe_shared) |sh| libswe_step.dependOn(&sh.step);
+
+    // Headers
+    b.installFile("include/swephexp.h", "include/swephexp.h");
+    b.installFile("include/sweodef.h", "include/sweodef.h");
+    b.installFile("include/sweph.h", "include/sweph.h");
+    b.installFile("include/swephlib.h", "include/swephlib.h");
+
+    // Facade module (importable by zig dep consumers)
+    _ = b.addModule("swisseph", .{
+        .root_source_file = b.path("src/swisseph.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // ── Tools (host-only) ───────────────────────────────────────────────────
+    if (!isWasm) {
+        const tools = [_]struct { name: []const u8, path: []const u8 }{
+            .{ .name = "swetest", .path = "src/bin/swetest.zig" },
+            .{ .name = "swevents", .path = "src/bin/swevents.zig" },
+            .{ .name = "swemini", .path = "src/bin/swemini.zig" },
+            .{ .name = "obama", .path = "src/bin/obama.zig" },
+            .{ .name = "swephgen4", .path = "src/ep4/swephgen4.zig" },
+        };
+        for (tools) |t| {
+            const m = mkmod(b, build_options, t.name, t.path, target, optimize);
+            m.addImport("swe_abi", swe_abi);
+            m.link_libc = true;
+            const exe = b.addExecutable(.{ .name = t.name, .root_module = m });
+            b.installArtifact(exe);
+        }
+
+        // Unit tests: single smoke-test root importing the facade.
+        // Shim attached ONLY here — attaching to multiple modules in the same
+        // link causes duplicate symbol errors. The facade transitively imports
+        // all subsystems.
+        const facade = mkmod(b, build_options, "swisseph", "src/swisseph.zig", target, optimize);
+        facade.addImport("sweph", sweph);
+        facade.addImport("swephlib", swephlib);
+        facade.addImport("deltat", deltat);
+        facade.addImport("swedate", swedate);
+        facade.addImport("swecl", swecl);
+        facade.addImport("swehouse", swehouse);
+        facade.addImport("swehel", swehel);
+        facade.addImport("swemmoon", swemmoon);
+        facade.addImport("swemplan", swemplan);
+        facade.addImport("swejpl", swejpl);
+        const smoke_mod = b.createModule(.{ .root_source_file = b.path("test/smoke.zig"), .target = target, .optimize = optimize });
+        smoke_mod.addImport("swe_abi", swe_abi);
+        const smoke_tests = b.addTest(.{ .root_module = smoke_mod });
+        const test_step = b.step("test", "Run unit tests");
+        test_step.dependOn(&b.addRunArtifact(smoke_tests).step);
+    }
+}

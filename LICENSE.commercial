@@ -1,0 +1,18 @@
+Commercial License
+==================
+
+The Zig port of Swiss Ephemeris in this repository is available under a
+dual-license model, mirroring the upstream Swiss Ephemeris licensing:
+
+  a) GNU Affero General Public License v3.0 (see LICENSE), or
+  b) a commercial license for use in closed-source products.
+
+Commercial licensing inquiries:
+
+  Mohammad Shafiee
+  muhammad.shafiee@gmail.com
+
+NOTE: Distributing this port under a commercial license requires the
+distributor to hold the corresponding upstream commercial rights from
+Astrodienst AG (Swiss Ephemeris Professional Edition / written permission).
+See NOTICE.md.

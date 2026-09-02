@@ -1,0 +1,16 @@
+.{
+    .fingerprint = 0xa47bf517f3db7b6e,
+    .name = .swisseph,
+    .version = "2.10.3",
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "include",
+        "LICENSE",
+        "LICENSE.commercial",
+        "NOTICE.md",
+        "README.md",
+    },
+}

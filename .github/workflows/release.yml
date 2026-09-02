@@ -1,0 +1,41 @@
+name: Release
+on:
+  push: { tags: ["v*"] }
+permissions:
+  contents: write
+jobs:
+  dist:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, triple: x86_64-linux }
+          - { os: ubuntu-latest, triple: aarch64-linux }
+          - { os: macos-latest, triple: aarch64-macos }
+          - { os: macos-latest, triple: x86_64-macos }
+          - { os: ubuntu-latest, triple: x86_64-windows }
+          - { os: ubuntu-latest, triple: wasm32-freestanding }
+          - { os: ubuntu-latest, triple: wasm32-wasi }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v1
+        with: { version: "0.16.0" }
+      - name: Build ${{ matrix.triple }}
+        run: |
+          mkdir -p dist/${{ matrix.triple }}/lib dist/${{ matrix.triple }}/bin dist/${{ matrix.triple }}/include
+          zig build --prefix zig-out/${{ matrix.triple }} -Dtarget=${{ matrix.triple }} -Doptimize=ReleaseFast
+          cp zig-out/${{ matrix.triple }}/lib/libswe.* dist/${{ matrix.triple }}/lib/ 2>/dev/null || true
+          [ -e zig-out/${{ matrix.triple }}/lib/swe.lib ] && cp zig-out/${{ matrix.triple }}/lib/swe.lib dist/${{ matrix.triple }}/lib/libswe.lib
+          [ -e zig-out/${{ matrix.triple }}/bin/swe.dll ] && cp zig-out/${{ matrix.triple }}/bin/swe.dll dist/${{ matrix.triple }}/lib/libswe.dll
+          cp include/*.h dist/${{ matrix.triple }}/include/
+          for b in swetest swevents swemini obama swephgen4; do
+            case "${{ matrix.triple }}" in
+              wasm32-freestanding) ;;
+              *windows*) [ -e zig-out/${{ matrix.triple }}/bin/$b.exe ] && cp zig-out/${{ matrix.triple }}/bin/$b.exe dist/${{ matrix.triple }}/bin/ ;;
+              *) [ -e zig-out/${{ matrix.triple }}/bin/$b ] && cp zig-out/${{ matrix.triple }}/bin/$b dist/${{ matrix.triple }}/bin/ ;;
+            esac
+          done
+      - name: Archive
+        run: cd dist && tar czf ../swisseph-zig-${{ matrix.triple }}.tar.gz ${{ matrix.triple }}
+      - uses: softprops/action-gh-release@v1
+        with: { files: "swisseph-zig-*.tar.gz" }
