@@ -21,6 +21,20 @@ const swemmoon = @import("swemmoon");
 const abi = @import("swe_abi");
 
 const N_WORKERS = 32; // heavy oversubscription vs typical 8-10 cores
+
+/// True when ephemeris data files exist at ../ephe (local dev); CI runs the
+/// Moshier-only fallback. Probed once.
+var ephe_avail: ?bool = null;
+fn epheFilesAvailable(io: std.Io) bool {
+    if (ephe_avail) |v| return v;
+    const cwd = std.Io.Dir.cwd();
+    const ok = blk: {
+        cwd.access(io, "../ephe/sefstars.txt", .{}) catch break :blk false;
+        break :blk true;
+    };
+    ephe_avail = ok;
+    return ok;
+}
 const N_SEQ = 40; // mixed ops per worker per round
 const ROUNDS = 4;
 
@@ -50,7 +64,7 @@ fn seqDate(i: usize) f64 {
 
 /// One deterministic mixed workload. `b` holds all state; nothing global
 /// is read or written.
-fn runSequence(b: *Bundle) void {
+fn runSequence(b: *Bundle, io: std.Io) void {
     var serr: [256]u8 = undefined;
 
     // per-bundle setup (mirrors what a real user thread does)
@@ -58,9 +72,12 @@ fn runSequence(b: *Bundle) void {
     const ephepath = std.fmt.bufPrintZ(&ephepath_buf, "../ephe", .{}) catch unreachable;
     sweph.swe_set_ephe_path(ephepath, &b.swed, &b.models, &b.dctx, null);
 
-    var jplname_buf: [64]u8 = undefined;
-    const jplname = std.fmt.bufPrintZ(&jplname_buf, "../ephe/de406.eph", .{}) catch unreachable;
-    sweph.swe_set_jpl_file(jplname, &b.swed, &b.models, &b.dctx);
+    const files = epheFilesAvailable(io);
+    if (files) {
+        var jplname_buf: [64]u8 = undefined;
+        const jplname = std.fmt.bufPrintZ(&jplname_buf, "../ephe/de406.eph", .{}) catch unreachable;
+        sweph.swe_set_jpl_file(jplname, &b.swed, &b.models, &b.dctx);
+    }
 
     for (0..N_SEQ) |i| {
         const jd_et = seqDate(i);
@@ -69,7 +86,9 @@ fn runSequence(b: *Bundle) void {
         var op_ok = true;
 
         // alternate ephemeris flags: JPL file / SWIEPH / Moshier
-        const flag: i32 = switch (i % 3) {
+        // (without ephe data, all ops fall back to Moshier — deterministic
+        // in both environments, bit-exact comparisons unchanged)
+        const flag: i32 = if (!files) lib.SEFLG_MOSEPH | lib.SEFLG_SPEED else switch (i % 3) {
             0 => lib.SEFLG_JPLEPH | lib.SEFLG_SPEED,
             1 => lib.SEFLG_SWIEPH | lib.SEFLG_SPEED,
             else => lib.SEFLG_MOSEPH | lib.SEFLG_SPEED,
@@ -108,12 +127,18 @@ fn runSequence(b: *Bundle) void {
         }
 
         // fixstar (loads sefstars.txt into swed.fixed_stars; the slast_*
-        // memos are per-Swed now)
+        // memos are per-Swed now). Without ephe data this op is skipped —
+        // the slot still computes a Moshier moon so comparisons stay aligned.
         var star_buf: [64]u8 = undefined;
-        const star = std.fmt.bufPrint(&star_buf, "Sirius", .{}) catch unreachable;
         var fserr: [256]u8 = undefined;
-        if (sweph.swe_fixstar2(star, jd_et, flag & @as(i32, 255), &xx, &b.swed, b.models, &b.dctx, &fserr) < 0)
-            op_ok = false;
+        if (files) {
+            const star = std.fmt.bufPrint(&star_buf, "Sirius", .{}) catch unreachable;
+            if (sweph.swe_fixstar2(star, jd_et, flag & @as(i32, 255), &xx, &b.swed, b.models, &b.dctx, &fserr) < 0)
+                op_ok = false;
+        } else {
+            if (sweph.swe_calc(jd_et, SE_MOON, lib.SEFLG_MOSEPH | lib.SEFLG_SPEED, &xx, &b.swed, b.models, &b.dctx, &serr) < 0)
+                op_ok = false;
+        }
 
         // direct moon internals with the per-bundle workspace
         var pol: [3]f64 = undefined;
@@ -129,11 +154,11 @@ fn runSequence(b: *Bundle) void {
     }
 }
 
-pub fn heavyRaceCheck() !void {
+pub fn heavyRaceCheck(io: std.Io) !void {
     // heap-allocate bundles: 32 x Swed exceeds comfortable main-stack use
     const ref = try std.heap.page_allocator.create(Bundle);
     ref.* = Bundle{};
-    for (0..ROUNDS) |_| runSequence(ref);
+    for (0..ROUNDS) |_| runSequence(ref, io);
     try std.testing.expectEqual(@as(usize, 0), ref.failed_ops);
 
     const bundles = try std.heap.page_allocator.alloc(Bundle, N_WORKERS);
@@ -142,10 +167,10 @@ pub fn heavyRaceCheck() !void {
     var threads: [N_WORKERS]std.Thread = undefined;
     for (0..N_WORKERS) |t| {
         threads[t] = std.Thread.spawn(.{}, struct {
-            fn run(b: *Bundle) void {
-                for (0..ROUNDS) |_| runSequence(b);
+            fn run(b: *Bundle, worker_io: std.Io) void {
+                for (0..ROUNDS) |_| runSequence(b, worker_io);
             }
-        }.run, .{&bundles[t]}) catch unreachable;
+        }.run, .{ &bundles[t], io }) catch unreachable;
     }
     for (0..N_WORKERS) |t| threads[t].join();
 
@@ -210,7 +235,7 @@ pub fn abiRaceCheck() !void {
 }
 
 test "heavy race (wrapper)" {
-    try heavyRaceCheck();
+    try heavyRaceCheck(std.testing.io);
 }
 test "ABI race (wrapper)" {
     try abiRaceCheck();

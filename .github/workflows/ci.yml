@@ -10,16 +10,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v1
-        with: { version: "0.16.0" }
+      - name: Install Zig 0.16.0 (direct from ziglang.org)
+        run: |
+          case "${{ runner.os }}-${{ runner.arch }}" in
+            Linux-X64)   triple=x86_64-linux ;;
+            Linux-ARM64) triple=aarch64-linux ;;
+            macOS-ARM64) triple=aarch64-macos ;;
+            macOS-X64)   triple=x86_64-macos ;;
+            *) echo "unsupported runner: ${{ runner.os }}-${{ runner.arch }}"; exit 1 ;;
+          esac
+          curl -fsSL --retry 3 -o /tmp/zig.tar.xz \
+            "https://ziglang.org/download/0.16.0/zig-${triple}-0.16.0.tar.xz"
+          mkdir -p "$HOME/.zig-sdk"
+          tar -xJf /tmp/zig.tar.xz -C "$HOME/.zig-sdk"
+          echo "$HOME/.zig-sdk/zig-${triple}-0.16.0" >> "$GITHUB_PATH"
+      - name: Zig version
+        run: zig version
       - name: Format check
         run: zig fmt --check src/ examples/ test/
-      - name: Unit tests
+      - name: Unit tests (incl. race stress, ephe-gated)
         run: zig build test
       - name: Build (native)
         run: zig build -Doptimize=ReleaseFast
       - name: Smoke test
         run: ./zig-out/bin/swetest -b1.1.2000 -p0 -fPLBRS -g, -head
+      - name: Examples
+        run: zig build examples
       - name: Cross-build smoke
         run: |
           zig build libswe -Dtarget=aarch64-linux -Doptimize=ReleaseFast
