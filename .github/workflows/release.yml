@@ -83,18 +83,8 @@ jobs:
         if: contains(matrix.triple, 'macos')
         run: |
           set -e
-          if ! command -v llvm-ar >/dev/null 2>&1; then
-            echo "::warning::llvm-ar not found; libswe.a may fail Apple ld64 alignment check"
-            exit 0
-          fi
-          lib="dist/${{ matrix.triple }}/lib/libswe.a"
-          tmp="$(mktemp -d)"
-          (cd "$tmp" && ar x "$GITHUB_WORKSPACE/$lib")
-          rm -f "$tmp/__.SYMDEF" "$tmp/__.SYMDEF_64" "$tmp/__SYMDEF" 2>/dev/null || true
-          chmod +w "$tmp"/*.o
-          llvm-ar rcs "$lib" "$tmp"/libswe_zcu.o "$tmp"/libmshim.o
-          rm -rf "$tmp"
-          echo "repacked $lib with llvm-ar"
+          python3 scripts/repack-ar-8byte.py dist/${{ matrix.triple }}/lib/libswe.a
+          ar t dist/${{ matrix.triple }}/lib/libswe.a
       - name: Verify produced libraries
         run: |
           shopt -s nullglob
