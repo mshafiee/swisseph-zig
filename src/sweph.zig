@@ -3548,6 +3548,16 @@ fn finish_swe_calc(iflag_in: i32, iflgsave: i32, ipl: i32, have_tjd: bool, xx: *
 }
 
 /// sweph.c swe_calc_ut
+/// sweph.c swe_close: close open ephemeris files and reset the instance
+/// state. (File handles are libc FILE*s; the C close path is reproduced.)
+pub fn swe_close(swed: *Swed) void {
+    for (&swed.fidat) |*fd| {
+        if (fd.fp) |fp| _ = fclose(fp);
+        fd.* = .{};
+    }
+    swed.* = .{};
+}
+
 pub fn swe_calc_ut(tjd_ut: f64, ipl: i32, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {
     var iflag = iflag_in;
     var retval: i32 = OK;
@@ -5356,7 +5366,6 @@ fn atofOffset(buf: *[AS_MAXCH]u8, off: usize) f64 {
 
 // ==================== fixed stars (sweph.c fixstar section) ====================
 
-
 fn fsRightTrim(tok: []u8) []u8 {
     var n = tok.len;
     while (n > 0 and (tok[n - 1] == ' ' or tok[n - 1] == '\t' or tok[n - 1] == '\n' or tok[n - 1] == '\r'))
@@ -5509,7 +5518,6 @@ fn fixstarCutString(srecord_in: []const u8, star: ?[]u8, stardata: *FixedStar, s
     stardata.mag = mag;
     return OK;
 }
-
 
 /// sweph.c save_star_in_struct (realloc pattern -> grow the slice)
 fn saveStarInStruct(nrecs: usize, fstp: *const FixedStar, swed: *Swed, serr: ?[]u8) i32 {
@@ -6455,7 +6463,6 @@ pub fn swe_fixstar2(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swe
     return iflag;
 }
 
-
 /// sweph.c swe_fixstar2_ut
 pub fn swe_fixstar2_ut(star: []u8, tjd_ut: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {
     var iflag = iflag_in;
@@ -6711,7 +6718,6 @@ pub fn swe_fixstar(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed
     }
     return iflag;
 }
-
 
 /// sweph.c swe_fixstar_ut
 pub fn swe_fixstar_ut(star: []u8, tjd_ut: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {

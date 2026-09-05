@@ -40,5 +40,19 @@ fictitious (7k), nutation interp (578), JPL (6.5k), fixstars (1.7k),
 swecl (12.5k), pheno (2.7k), rise/set (8.9k), heliacal (3.5k), nod_aps
 (3k), eclipses (282), asteroids (26k), planetary moons (3.1k).
 
+Total: **4,428,079 cases, 0 failures** on every release gate.
+
 The verification harness lives in a companion repo (`swisseph-zig-verify`)
-and gates every release.
+and gates every release:
+
+```sh
+cd swisseph-zig-verify
+make verify FORCE=1   # 21 corpora, 4.4M cases, 0 failures required
+make abi              # 119 exported symbols, pure-helper parity vs C libswe.a
+make tools            # swetest/swemini/obama/swevents byte-exact vs C oracles
+```
+
+Threading is verified in-repo by a race stress test (`zig build run-stress`):
+32 concurrent workers with independent context bundles reproduce a
+single-threaded reference bit-for-bit across a mixed JPL/SWIEPH/Moshier
+workload with non-monotonic dates.

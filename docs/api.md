@@ -17,10 +17,13 @@ swe.revjul(jd, 1, &y, &m, &d, &ut);
 ## Planetary positions (sweph)
 
 ```zig
+var swed = swe.sweph.Swed{};
+var dctx = swe.deltat.DeltatCtx{};
+const models = swe.swephlib.AstroModels{};
 var xx: [6]f64 = undefined;
 var serr: [256]u8 = undefined;
-const jd_et = jd + swe.deltat_ex(jd, -1);
-_ = swe.calc(jd_et, 0, 256, &xx, &serr); // Sun, SEFLG_SPEED
+const jd_et = jd + swe.deltat_ex(&dctx, jd, -1);
+_ = swe.sweph.swe_calc(jd_et, 0, 256, &xx, &swed, models, &dctx, &serr);
 // xx[0]=longitude, xx[1]=latitude, xx[2]=distance, xx[3]=speed
 ```
 
@@ -29,14 +32,22 @@ _ = swe.calc(jd_et, 0, 256, &xx, &serr); // Sun, SEFLG_SPEED
 ```zig
 var cusps: [37]f64 = undefined;
 var ascmc: [10]f64 = undefined;
-_ = swe.houses_ex(jd_ut, 0, 48.5, 11.0, 'P', &cusps, &ascmc);
+var hctx = swe.swehouse.HouseCtx{};
+_ = swe.houses_armc_ex2(armc, 48.5, 23.4367, 'P', &cusps, &ascmc, null, null, null, &hctx);
+// C's swe_houses/swe_houses_ex convenience wrappers live in the C-ABI layer
+// (they need engine-computed obliquity); at the Zig API level you pass armc
+// and obliquity yourself via swe.houses_armc_ex2.
 ```
 
 ## Eclipses (swecl)
 
 ```zig
+var swed = swe.sweph.Swed{};
+var dctx = swe.deltat.DeltatCtx{};
+const models = swe.swephlib.AstroModels{};
 var tret: [10]f64 = undefined;
-const flag = swe.sol_eclipse_when_glob(jd, 0, 0, &tret, 0, &serr);
+var serr: [256]u8 = undefined;
+const flag = swe.swecl.swe_sol_eclipse_when_glob(jd, 0, 0, &tret, false, &serr, &swed, models, &dctx);
 ```
 
 ## Modules
@@ -68,7 +79,7 @@ const models = swe.swephlib.AstroModels{};
 
 var xx: [6]f64 = undefined;
 var serr: [256]u8 = undefined;
-_ = swe.sweph.swe_calc(jd_et, swe.sweph.SE_SUN, 0, &xx, &swed, models, &dctx, &serr);
+_ = swe.sweph.swe_calc(jd_et, 0, 0, &xx, &swed, models, &dctx, &serr);
 ```
 
 **One bundle per thread.** Pass your `Swed` + ctx pointers to whichever

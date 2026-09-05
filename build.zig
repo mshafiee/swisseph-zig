@@ -226,6 +226,26 @@ pub fn build(b: *std.Build) void {
         });
         run_stress_step.dependOn(&b.addRunArtifact(stress_runner).step);
 
+        // Examples (compiled as part of test to keep them working)
+        const ex_mod = b.createModule(.{ .root_source_file = b.path("examples/zig-native/main.zig"), .target = target, .optimize = optimize });
+        ex_mod.addOptions("build_options", build_options);
+        ex_mod.addImport("swisseph", facade);
+        ex_mod.addCSourceFile(.{ .file = b.path("src/libmshim.c"), .flags = &.{} });
+        ex_mod.link_libc = true;
+        const example = b.addExecutable(.{ .name = "example-native", .root_module = ex_mod });
+        const examples_step = b.step("examples", "Build the examples");
+        examples_step.dependOn(&b.addInstallArtifact(example, .{}).step);
+        test_step.dependOn(&example.step);
+
+        // README quick-start snippet, compiled verbatim on every test run
+        const readme_mod = b.createModule(.{ .root_source_file = b.path("examples/zig-native/readme_check.zig"), .target = target, .optimize = optimize });
+        readme_mod.addOptions("build_options", build_options);
+        readme_mod.addImport("swisseph", facade);
+        readme_mod.addCSourceFile(.{ .file = b.path("src/libmshim.c"), .flags = &.{} });
+        readme_mod.link_libc = true;
+        const readme_check = b.addExecutable(.{ .name = "readme-check", .root_module = readme_mod });
+        test_step.dependOn(&b.addRunArtifact(readme_check).step);
+
         // zig-difftest: recomputes the 21 verification corpora bit-for-bit
         // (drives the swisseph-zig-verify harness; corpus files live there).
         const dt_mod = b.createModule(.{ .root_source_file = b.path("src/difftest.zig"), .target = target, .optimize = optimize });

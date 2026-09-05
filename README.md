@@ -38,16 +38,24 @@ zig fetch --save git+https://github.com/mshafiee/swisseph-zig
 ```
 
 ```zig
+const std = @import("std");
 const swe = @import("swisseph");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    _ = init;
+    var swed = swe.sweph.Swed{};       // engine state (files, caches)
+    var dctx = swe.deltat.DeltatCtx{}; // delta-T state
+    const models = swe.swephlib.AstroModels{};
     var xx: [6]f64 = undefined;
     var serr: [256]u8 = undefined;
-    const jd = swe.julday(2000, 1, 1, 12.0, swe.swedate.SE_GREG_CAL);
-    _ = swe.calc_ut(jd, 0, swe.sweph.SEFLG_SPEED, &xx, &serr);
+    const jd_ut = swe.julday(2000, 1, 1, 12.0, swe.swedate.SE_GREG_CAL);
+    _ = swe.calc_ut(jd_ut, 0, swe.sweph.SEFLG_SPEED, &xx, &swed, models, &dctx, &serr);
     std.debug.print("Sun: {d:.6}°\n", .{xx[0]});
 }
 ```
+
+Every computation takes its state as explicit parameters — nothing hides in
+module-level globals (see [Threading contract](#threading-contract)).
 
 ### C ABI drop-in
 
@@ -56,7 +64,8 @@ make native
 cc myprog.c -Idist/<host>/include -Ldist/<host>/lib -lswe -lm -o myprog
 ```
 
-The 107 exported `swe_*` symbols match `swephexp.h` — existing C code
+The exported `swe_*` symbols cover all 107 upstream `swephexp.h` API
+functions (119 exported incl. internal shims) — existing C code
 compiled against the upstream library links without source changes.
 
 ### CLI tools
@@ -83,15 +92,19 @@ src/
 ├── swephlib.zig   ← precession, nutation, obliquity, coordinate transforms
 ├── swemmoon.zig   ← Moshier moon
 ├── swemplan.zig   ← Moshier planets + fictitious bodies (seorbel)
-├── swejpl.zig     ← JPL binary file reader (de431/de406)
+├── swejpl.zig     ← JPL binary file reader (DE200/DE406/DE441)
 ├── swehouse.zig   ← 25 house systems
 ├── swecl.zig      ← eclipses, rise/set, azalt, pheno, nod_aps, gauquelin
 ├── swehel.zig     ← heliacal events, visibility limits
 ├── swedate.zig    ← calendar conversions
 ├── deltat.zig     ← delta-T models
-├── swe_abi.zig    ← 107 C-ABI swe_* exports
+├── swe_abi.zig    ← C-ABI: all 107 swe_* API exports (threadlocal SweState)
 └── libm/cr.zig    ← correctly-rounded f128 math (for -Dpure)
 ```
+
+Plus the differential-test harness (`difftest.zig` + per-module checkers)
+and race stress tests (`test_stress_race.zig`, `verify/concurrent/`) used
+by the verification gate.
 
 <details>
 <summary>All 107 C-ABI symbols</summary>
@@ -129,6 +142,8 @@ src/
 |---|---|---|
 | `x86_64-linux` | `.a` + `.so` | ELF bins |
 | `aarch64-linux` | `.a` + `.so` | ELF bins |
+| `x86_64-freebsd` | `.a` + `.so` | ELF bins |
+| `aarch64-freebsd` | `.a` + `.so` | ELF bins |
 | `x86_64-macos` | `.a` + `.dylib` | Mach-O bins |
 | `aarch64-macos` | `.a` + `.dylib` | Mach-O bins |
 | `x86_64-windows` | `.lib` + `.dll` | `.exe` |
@@ -180,9 +195,12 @@ ABI (`swe_set_sid_mode`, `swe_set_ephe_path`, fixstar cache, …) is
 **per-thread**; do setup on every thread that calls the library.
 `SweState.deinit()` frees the fixstar backing buffer at thread teardown.
 
-Verified by `zig build test`: 4 threads × 64 interleaved, non-monotonic
-dates with independent bundles produce bit-identical results to a
-single-threaded reference, plus ABI sid-mode non-leak across threads.
+Verified by `zig build test`: 32 threads × 4 rounds of a mixed workload
+(JPL/SWIEPH/Moshier `swe_calc`, `swe_fixstar2` memo invalidation, houses,
+sidereal-mode toggles, moon apsides/mean-elements on non-monotonic dates)
+produce bit-identical results to a single-threaded reference, plus an
+8-thread ABI stress and sid-mode non-leak across threads. Run the stress
+standalone with `zig build run-stress`.
 
 ## License
 

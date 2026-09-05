@@ -36,7 +36,7 @@ pub const set_ephe_path = sweph.swe_set_ephe_path;
 pub const set_jpl_file = sweph.swe_set_jpl_file;
 pub const set_topo = sweph.swe_set_topo;
 pub const set_sid_mode = sweph.swe_set_sid_mode;
-pub const close = sweph.swe_close;
+pub const close = sweph.swe_close; // close(swed)
 pub const fixstar = sweph.swe_fixstar;
 pub const fixstar_ut = sweph.swe_fixstar_ut;
 pub const fixstar_mag = sweph.swe_fixstar_mag;
@@ -44,8 +44,6 @@ pub const get_planet_name = sweph.swe_get_planet_name;
 pub const get_ayanamsa_ex = sweph.swe_get_ayanamsa_ex;
 pub const get_ayanamsa_ex_ut = sweph.swe_get_ayanamsa_ex_ut;
 
-pub const houses = swehouse.swe_houses;
-pub const houses_ex = swehouse.swe_houses_ex;
 pub const houses_armc = swehouse.swe_houses_armc;
 pub const houses_armc_ex2 = swehouse.swe_houses_armc_ex2;
 pub const house_pos = swehouse.swe_house_pos;
