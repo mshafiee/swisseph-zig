@@ -205,6 +205,27 @@ ephemeris (`SEFLG_MOSEPH`). For higher precision, download the Swiss
 Ephemeris `.se1` files from [astro.com](https://www.astro.com/ftp/swisseph/ephe/)
 and call `swe_set_ephe_path("ephe/")`. See [docs/data-files.md](docs/data-files.md).
 
+## Documentation
+
+Start with [docs/api.md](docs/api.md) (setup, calendar, positions, houses,
+eclipses, threading). Then the exhaustive reference in
+[docs/ref/SUMMARY.md](docs/ref/SUMMARY.md) — 23 files covering every const,
+body, star, house, ayanamsha, model, flag, and all 107 functions:
+
+| Guide | Covers |
+|---|---|
+| `ref/consts.md` | units, epochs, validity windows, return codes, tidal, speed steps |
+| `ref/bodies-00-22.md`, `bodies-fict.md`, `ref/bodies-moons.md`, `ref/bodies-asteroids.md`, `ref/stars.md` | planets, Uranian/hypothetical + `seorbel.txt`, moons/COB, asteroids/comets, `sefstars.txt` + `fixstar` API |
+| `ref/houses-A-Y.md` | all 26 house codes + Placidus default |
+| `ref/ayanamsha-00-46.md`, `ref/models.md` | 47 ayanamshas + precession/nutation/sidtime/bias/JPLHor/Delta-T |
+| `ref/flags-calc.md`, `ref/flags-eclipse-rise-heliacal.md` | `SEFLG_*`, nodes, eclipse/rise/heliacal bits |
+| `ref/funcs-calc.md`, `ref/funcs-houses.md`, `ref/funcs-eclipse.md`, `ref/funcs-datetime.md`, `ref/funcs-heliacal.md` | all 107 `swe_*` + `swe_cleanup` |
+| `ref/appendix-math.md`, `ref/appendix-biblio-glossary.md` | KaTeX equations, bibliography, glossary |
+
+Data files: [docs/data-files.md](docs/data-files.md) (+ `ref/data-files.md`).
+Parity: [docs/parity.md](docs/parity.md) (+ `ref/threading-build.md`,
+`ref/c-zig-map.md`, `ref/migration-faq.md`).
+
 ## Parity methodology
 
 Every module was ported 1:1 — exact floating-point operation order, exact
@@ -236,6 +257,13 @@ produce bit-identical results to a single-threaded reference, plus an
 standalone with `zig build run-stress`.
 
 ## License
+
+> **Public API use requires prior written permission.** Any public/hosted API
+> use — REST, gRPC, GraphQL, SaaS, serverless, or any network service
+> embedding this library — requires prior written permission from Mohammad
+> Shafiee (muhammad.shafiee@gmail.com) **before launch**, documented via
+> [`API-LICENSE`](API-LICENSE), even for open-source or AGPL-compliant
+> projects.
 
 Dual-licensed, same model as upstream Swiss Ephemeris:
 

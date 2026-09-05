@@ -1,0 +1,28 @@
+swisseph-zig — Public API / Hosted-Service License Grant
+=========================================================
+
+Licensor: Mohammad Shafiee <muhammad.shafiee@gmail.com>
+Licensee: [LEGAL NAME / COMPANY]
+Contact:  [EMAIL]
+Effective: [YYYY-MM-DD]   Scope: [endpoints/services, e.g. POST /positions]
+Term: [e.g. 12 months, auto-renew]   Territory: [worldwide / list]
+
+1. Grant. Licensor grants Licensee a non-exclusive, non-transferable right
+   to expose this library (in whole or in part) over a network — REST, gRPC,
+   GraphQL, SaaS, serverless — strictly within Scope above. 
+   Prior written permission (email suffices) must be received BEFORE launch.
+
+2. Conditions. (a) Written grant received before launch; (b) attribution
+   "Swiss Ephemeris (Astrodienst AG) via swisseph-zig" in docs/status
+   endpoint; (c) Licensee holds any required upstream Swiss Ephemeris
+   rights from Astrodienst AG for commercial use (see NOTICE.md).
+
+3. No other rights. Local embedding without network exposure is governed
+   by the repo's dual-license choice (AGPL-3.0 or commercial); this grant
+   adds only the network-use right described in §1. Open-source or
+   AGPL-compliant status alone does not substitute for this grant.
+
+4. Termination. Breach of Scope/conditions terminates on 30-day notice.
+
+Signed: ________________ (Licensor)   Date: __________
+Signed: ________________ (Licensee)   Date: __________

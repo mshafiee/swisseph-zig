@@ -16,3 +16,7 @@ NOTE: Distributing this port under a commercial license requires the
 distributor to hold the corresponding upstream commercial rights from
 Astrodienst AG (Swiss Ephemeris Professional Edition / written permission).
 See NOTICE.md.
+
+Public API / hosted-service use requires prior written permission from
+Mohammad Shafiee (muhammad.shafiee@gmail.com) before launch, documented
+via API-LICENSE — including for open-source or AGPL-compliant projects.

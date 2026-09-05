@@ -1,97 +1,76 @@
-# API Tour
+# API Tour — full guide (verified against `examples/`)
 
-Import the facade:
+> Exposing this over a network? Prior written permission is required —
+> see [`API-LICENSE`](../API-LICENSE) and [`license.md`](license.md).
 
+Import: `const swe = @import("swisseph");` Facade: `src/swisseph.zig:1`. All snippets below match `examples/zig-native/main.zig:1` and `readme_check.zig:1` (compiled by `zig build test`).
+
+## 0. Setup first (both APIs)
+
+Zig (explicit contexts — no globals):
 ```zig
-const swe = @import("swisseph");
+var swed = swe.sweph.Swed{};
+var dctx = swe.deltat.DeltatCtx{};
+const models = swe.swephlib.AstroModels{};
+var serr: [256]u8 = undefined;
+swe.set_ephe_path("/data/ephe", &swed); // or NULL for Moshier-only; call always
 ```
+C (per-thread state):
+```c
+char serr[256];
+swe_set_ephe_path("/data/ephe");
+```
+One bundle per thread; repeat setup per thread. Teardown: Zig `SweState.deinit()`, C `swe_close()` + `swe_cleanup()`. See `ref/threading-build.md`, `ref/c-zig-map.md`.
 
-## Calendar (swedate)
+## 1. Calendar (`swedate`, `ref/funcs-datetime.md`)
 
 ```zig
-const jd = swe.julday(2000, 1, 1, 12.0, 1); // SE_GREG_CAL
+const jd_ut = swe.julday(2000, 1, 1, 12.0, swe.swedate.SE_GREG_CAL); // 2451545.0
 var y: i32 = 0; var m: i32 = 0; var d: i32 = 0; var ut: f64 = 0;
-swe.revjul(jd, 1, &y, &m, &d, &ut);
+swe.revjul(jd_ut, swe.swedate.SE_GREG_CAL, &y, &m, &d, &ut);
 ```
+`SE_JUL_CAL=0` / `SE_GREG_CAL=1` — no auto-cutover. Invalid date → `ERR` from `date_conversion`/`utc_to_jd`.
 
-## Planetary positions (sweph)
+## 2. Positions (`sweph`, `ref/bodies-*.md`, `ref/flags-calc.md`)
 
 ```zig
-var swed = swe.sweph.Swed{};
-var dctx = swe.deltat.DeltatCtx{};
-const models = swe.swephlib.AstroModels{};
-var xx: [6]f64 = undefined;
-var serr: [256]u8 = undefined;
-const jd_et = jd + swe.deltat_ex(&dctx, jd, -1);
-_ = swe.sweph.swe_calc(jd_et, 0, 256, &xx, &swed, models, &dctx, &serr);
-// xx[0]=longitude, xx[1]=latitude, xx[2]=distance, xx[3]=speed
+var xx: [6]f64 = undefined; // lon,lat,dist-AU,dLon,dLat,dDist
+const r = swe.calc_ut(jd_ut, 0, swe.sweph.SEFLG_SPEED, &xx, &swed, models, &dctx, &serr);
+if (r < 0) return error.CalcFailed; // BEYOND=-3 outside span, xx=0 — don't plot
 ```
+Bodies: `0` Sun … `22` Priapus, `40–58` fict, `10000+N` asteroids, `9000+…` moons, `-10` stars. `iflag==0` = apparent geocentric; always OR `SEFLG_SPEED`.
 
-## Houses (swehouse)
+## 3. Houses (`swehouse`, `ref/houses-A-Y.md`)
 
 ```zig
-var cusps: [37]f64 = undefined;
-var ascmc: [10]f64 = undefined;
+var cusps: [37]f64 = undefined; var ascmc: [10]f64 = undefined;
 var hctx = swe.swehouse.HouseCtx{};
-_ = swe.houses_armc_ex2(armc, 48.5, 23.4367, 'P', &cusps, &ascmc, null, null, null, &hctx);
-// C's swe_houses/swe_houses_ex convenience wrappers live in the C-ABI layer
-// (they need engine-computed obliquity); at the Zig API level you pass armc
-// and obliquity yourself via swe.houses_armc_ex2.
+swe.set_topo(8.5, 47.4, 400, &swed); // only for 'T'
+_ = swe.houses_armc_ex2(armc, 47.4, eps, 'P', &cusps, &ascmc, null, null, null, &hctx);
+// ascmc[0] ASC [1] MC [2] ARMC [3] Vertex; cusps[1..12]; G writes [1..36]
 ```
+Get `eps`/`armc` from body `-1` calc or `sidtime`. Polar |lat|>66.5° → prefer U/Q/L/O/S over P/K.
 
-## Eclipses (swecl)
+## 4. Eclipses / rise / stars
 
 ```zig
-var swed = swe.sweph.Swed{};
-var dctx = swe.deltat.DeltatCtx{};
-const models = swe.swephlib.AstroModels{};
-var tret: [10]f64 = undefined;
-var serr: [256]u8 = undefined;
-const flag = swe.swecl.swe_sol_eclipse_when_glob(jd, 0, 0, &tret, false, &serr, &swed, models, &dctx);
+var tret: [10]f64 = undefined; var attr: [20]f64 = undefined;
+const m = swe.sol_eclipse_when_glob(jd_ut, 0, 4, &tret, false, &serr, &swed, models, &dctx); // TOTAL
+var star: [512]u8 = undefined; @memcpy(star[0.."Spica".len], "Spica");
+_ = swe.fixstar_ut(star[0..], jd_ut, swe.sweph.SEFLG_SPEED, &xx, &swed, models, &dctx, &serr);
 ```
+Full signatures: `ref/funcs-eclipse.md`, `ref/stars.md`, `ref/funcs-heliacal.md`.
 
 ## Modules
 
-| Module | Scope |
-|---|---|
-| `swedate` | julday, revjul, date_conversion, utc_time_zone |
-| `deltat` | delta-T models |
-| `swephlib` | precession, nutation, obliquity, coordinate transforms |
-| `swemmoon` | Moshier moon |
-| `swemplan` | Moshier planets + fictitious bodies |
-| `swejpl` | JPL binary file reader |
-| `sweph` | swe_calc engine, file machinery, fixstars, asteroids |
-| `swehouse` | 25 house systems |
-| `swecl` | eclipses, rise/set, azalt, pheno, nod_aps, gauquelin |
-| `swehel` | heliacal events, visibility |
-| `swe_abi` | 107 C-ABI `swe_*` exports → libswe |
-
-## Contexts & threading
-
-Every mutable library state lives in explicit per-instance context structs.
-Computations take their contexts as parameters — nothing is hidden in
-module-level globals:
-
-```zig
-var swed = swe.sweph.Swed{};      // engine state: pldat, ephemeris files, caches
-var dctx = swe.deltat.DeltatCtx{}; // delta-T state
-const models = swe.swephlib.AstroModels{};
-
-var xx: [6]f64 = undefined;
-var serr: [256]u8 = undefined;
-_ = swe.sweph.swe_calc(jd_et, 0, 0, &xx, &swed, models, &dctx, &serr);
-```
-
-**One bundle per thread.** Pass your `Swed` + ctx pointers to whichever
-thread needs them; threads with separate bundles never interact. Sharing a
-bundle across threads requires external locking (then results are
-deterministic — verified by `zig build test`).
-
-The C-ABI layer exposes the same engine behind a `threadlocal SweState`
-(one isolated C-API instance per OS thread, mirroring C TLS statics).
-For C users: `swe_close()` closes open ephemeris files and frees the calling
-thread's caches; the additional `swe_cleanup()` export (guarded by
-`SWE_ZIG_EXTENSIONS` in the shipped headers) frees just the fixstar cache.
-From Zig, call `swe_abi.SweState.deinit()` on your own bundle instead.
-
-See the “Threading contract” section in README.md.
+| Module | Scope | Ref |
+|---|---|---|
+| `swedate` | julday/revjul/utc_* | `funcs-datetime` |
+| `deltat` | Delta-T + tidal | `models`, `consts` |
+| `swephlib` | precession/nutation/cotrans/models | `models` |
+| `swemmoon/swemplan/swejpl` | Moshier/JPL engines | `bodies-*` |
+| `sweph` | calc engine, files, fixstars | `funcs-calc` |
+| `swehouse` | 26 systems | `houses-A-Y` |
+| `swecl` | eclipse/rise/pheno/nodes | `funcs-eclipse` |
+| `swehel` | heliacal Schaefer | `funcs-heliacal` |
+| `swe_abi` | 107 `swe_*` → libswe | `c-zig-map` |

@@ -1,58 +1,31 @@
-# Bit-Parity Methodology
+# Bit-Parity Methodology — full guide
 
-The port was verified bit-for-bit against the original C code using a
-differential-testing harness (the "oracle" pattern):
+Port rule: exact FP op order, exact constants/tables, `==` compare on `%.17g` round-trip — never tolerance. Oracle C compiled `-ffp-contract=off`. Detail: `ref/threading-build.md`.
 
-1. **C oracle** compiled with `-ffp-contract=off` — one IEEE-754 rounding per
-   operation, reflecting the operation order *written* in the C source.
-2. **Zig port** preserves the exact FP operation order (no reordering, no
-   FMA contraction).
-3. **Comparison** uses exact `==` on `%.17g`-round-tripped doubles — never
-   a tolerance.
+## FMA trap (why `-ffp-contract=off`)
 
-## The FMA trap
+Apple clang fuses `a*b+c` by default → ≤1 ULP, non-portable across GCC/MSVC/ARM/x86. Zig never contracts → matches no-FMA oracle exactly. Forgetting the flag is the #1 false-mismatch cause.
 
-Apple clang's default `-ffp-contract=on` fuses `a*b+c` into FMA, producing
-up to 1-ULP differences that are **not portable** (GCC/MSVC/ARM/x86 all
-differ). The oracle must be compiled with `-ffp-contract=off`. Zig's
-default (no contraction) matches the no-FMA oracle exactly.
+## libm strategy (`src/libmshim.c`, `src/libm/cr.zig`)
 
-## libm strategy
-
-| Path | `sin/cos/tan/log/log10/exp/fmod` | `atan/asin/acos/atan2/pow` |
+| Path | `sin/cos/tan/log/exp/fmod` | `atan/asin/acos/atan2/pow` |
 |---|---|---|
-| Default (shim) | platform libm via `dlsym` — bit-exact | same |
-| `-Dpure` | Zig `std.math` — bit-identical to libm | `f128` correctly-rounded — 1 ULP vs libm on some args |
+| Default shim | platform libm via `dlsym`, bit-exact | bit-exact |
+| `-Dpure` | Zig `std.math`, bit-identical | `f128` Ziv correctly-rounded → 1 ULP vs libm by design |
 
-Platform `libm` is itself **not correctly rounded** for `atan/asin/acos/
-atan2/pow` (measured vs 60-digit mpmath: `atan` 4% wrong, `acos` 15%).
-The `cr.zig` fallback uses `f128` (113-bit) + Ziv rounding — correctly
-rounded, but therefore differs from the C libm by design. Vendoring
-Apple's actual algorithms (Taligent double-double) is blocked by the
-APSL license (GPL-incompatible).
+libm itself is unrounded for the right column (vs 60-digit mpmath: `atan` 4%, `acos` 15% off). Vendoring Apple Taligent double-double blocked by APSL. WASM/Windows force pure.
 
-## Corpora
+## Corpora: 4,428,079 cases, 0 failures
 
-21 corpora cover every code path: swedate (2.2M), delta-T (28k), houses
-(338k), Moshier moon (348k), Moshier planets (195k), nutation+sidereal
-(17k), swe_calc MOSEPH+SWIEPH (1.2M), sidereal (21k), topocentric (10k),
-fictitious (7k), nutation interp (578), JPL (6.5k), fixstars (1.7k),
-swecl (12.5k), pheno (2.7k), rise/set (8.9k), heliacal (3.5k), nod_aps
-(3k), eclipses (282), asteroids (26k), planetary moons (3.1k).
+swedate 2.2M · calc MOSEPH+SWIEPH 1.2M · Moshier moon 348k · houses 338k · Moshier planets 195k · asteroids 26k · sidereal 21k+21k · swecl 12.5k · topocentric 10k · rise/set 8.9k · JPL 6.5k · fict 7k · heliacal 3.5k · moons 3.1k · nod_aps 3k · pheno 2.7k · fixstars 1.7k · nut-interp 578 · eclipses 282 · Delta-T 28k.
 
-Total: **4,428,079 cases, 0 failures** on every release gate.
-
-The verification harness lives in a companion repo (`swisseph-zig-verify`)
-and gates every release:
+## Release gate (companion `swisseph-zig-verify`)
 
 ```sh
-cd swisseph-zig-verify
-make verify FORCE=1   # 21 corpora, 4.4M cases, 0 failures required
-make abi              # 119 exported symbols, pure-helper parity vs C libswe.a
-make tools            # swetest/swemini/obama/swevents byte-exact vs C oracles
+make verify FORCE=1  # 21 corpora, 4.4M, 0 failures required
+make abi             # 119 symbols, helper parity vs C libswe.a
+make tools           # swetest/swemini/obama/swevents byte-exact
+zig build run-stress # 32-thread mixed-workload determinism (in-repo)
 ```
 
-Threading is verified in-repo by a race stress test (`zig build run-stress`):
-32 concurrent workers with independent context bundles reproduce a
-single-threaded reference bit-for-bit across a mixed JPL/SWIEPH/Moshier
-workload with non-monotonic dates.
+External accuracy (not parity): vs Astronomical Almanac 0.001", vs Horizons ~1 mas 1962–today with EOP (~2 mas approx), DE431–DE406 <0.4" Sun / <129" Pluto. State model + file set with every published number.

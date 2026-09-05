@@ -10,6 +10,7 @@
         "include",
         "LICENSE",
         "LICENSE.commercial",
+        "API-LICENSE",
         "NOTICE.md",
         "README.md",
     },
