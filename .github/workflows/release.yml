@@ -42,6 +42,8 @@ jobs:
           restore-keys: zig-test-${{ env.ZIG_VERSION }}-${{ runner.os }}-
       - name: Unit tests (incl. race stress)
         run: zig build test
+      - name: Build native tools
+        run: zig build -Doptimize=ReleaseFast
       - name: Smoke test
         shell: bash
         run: |
