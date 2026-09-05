@@ -56,8 +56,8 @@ jobs:
       fail-fast: false
       matrix:
         triple:
-          - x86_64-linux
-          - aarch64-linux
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
           - x86_64-freebsd
           - aarch64-freebsd
           - x86_64-macos
@@ -86,7 +86,7 @@ jobs:
           [ ${#libs[@]} -gt 0 ] || { echo "no libraries produced"; exit 1; }
           file "${libs[@]}"
       - name: Smoke test (native linux only)
-        if: matrix.triple == 'x86_64-linux'
+        if: matrix.triple == 'x86_64-linux-gnu'
         run: dist/${{ matrix.triple }}/bin/swetest -b1.1.2000 -p0 -fPLBRS -g, -head
       - name: Package
         id: package

@@ -75,7 +75,7 @@ CI builds all 9 targets on every `v*` tag and attaches archives to the
 
 | Target | Archive |
 |---|---|
-| `x86_64-linux`, `aarch64-linux` | `swisseph-zig-<ver>-<triple>.tar.gz` |
+| `x86_64-linux-gnu`, `aarch64-linux-gnu` | `swisseph-zig-<ver>-<triple>.tar.gz` |
 | `x86_64-macos`, `aarch64-macos` | `swisseph-zig-<ver>-<triple>.tar.gz` |
 | `x86_64-freebsd`, `aarch64-freebsd` | `swisseph-zig-<ver>-<triple>.tar.gz` |
 | `x86_64-windows` | `swisseph-zig-<ver>-x86_64-windows.zip` |

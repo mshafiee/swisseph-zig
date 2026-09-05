@@ -24,7 +24,7 @@ else
     HOST_TRIPLE := x86_64-linux
   endif
 endif
-TRIPLES_ALL := x86_64-linux aarch64-linux x86_64-freebsd aarch64-freebsd x86_64-macos aarch64-macos x86_64-windows wasm32-freestanding wasm32-wasi
+TRIPLES_ALL := x86_64-linux-gnu aarch64-linux-gnu x86_64-freebsd aarch64-freebsd x86_64-macos aarch64-macos x86_64-windows wasm32-freestanding wasm32-wasi
 
 .DEFAULT_GOAL := native
 .PHONY: help all build native linux freebsd macos windows wasm dist test lint format fmt clean distclean install release _collect-triple

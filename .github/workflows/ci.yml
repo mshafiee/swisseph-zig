@@ -48,7 +48,7 @@ jobs:
       - name: Cross-build smoke
         if: runner.os == 'Linux'
         run: |
-          zig build libswe -Dtarget=aarch64-linux -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseFast
           zig build libswe -Dtarget=x86_64-windows -Doptimize=ReleaseFast
           zig build libswe -Dtarget=x86_64-macos -Doptimize=ReleaseFast
           zig build libswe -Dtarget=aarch64-macos -Doptimize=ReleaseFast
