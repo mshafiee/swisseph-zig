@@ -2896,8 +2896,8 @@ fn cutlistContains(cutlist: []const u8, c: u8) bool {
     return false;
 }
 
-var crc32_table: [256]u32 = [_]u32{0} ** 256;
-var crc32_table_done: bool = false;
+threadlocal var crc32_table: [256]u32 = [_]u32{0} ** 256;
+threadlocal var crc32_table_done: bool = false;
 const CRC32_POLY: u32 = 0x04c11db7; // AUTODIN II, Ethernet, & FDDI
 
 fn init_crc32() void {

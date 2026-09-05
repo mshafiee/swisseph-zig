@@ -231,39 +231,39 @@ const NLRT2: usize = 25;
 const NBT2: usize = 12;
 
 // --- file static state (swemmoon.c; TLS in C, plain here) ---
-var ss: [5][8]f64 = undefined;
-var cc: [5][8]f64 = undefined;
-var l: f64 = undefined; // Moon's ecliptic longitude
-var B: f64 = undefined; // Ecliptic latitude
-var moonpol: [3]f64 = undefined;
-var SWELP: f64 = undefined;
-var M: f64 = undefined;
-var MP: f64 = undefined;
-var D: f64 = undefined;
-var NF: f64 = undefined;
-var T: f64 = undefined;
-var T2: f64 = undefined;
-var T3: f64 = undefined;
-var T4: f64 = undefined;
-var f: f64 = undefined;
-var g: f64 = undefined;
-var Ve: f64 = undefined;
-var Ea: f64 = undefined;
-var Ma: f64 = undefined;
-var Ju: f64 = undefined;
-var Sa: f64 = undefined;
-var cg: f64 = undefined;
-var sg: f64 = undefined;
-var l1: f64 = undefined;
-var l2: f64 = undefined;
-var l3: f64 = undefined;
-var l4: f64 = undefined;
+threadlocal var ss: [5][8]f64 = undefined;
+threadlocal var cc: [5][8]f64 = undefined;
+threadlocal var l: f64 = undefined; // Moon's ecliptic longitude
+threadlocal var B: f64 = undefined; // Ecliptic latitude
+threadlocal var moonpol: [3]f64 = undefined;
+threadlocal var SWELP: f64 = undefined;
+threadlocal var M: f64 = undefined;
+threadlocal var MP: f64 = undefined;
+threadlocal var D: f64 = undefined;
+threadlocal var NF: f64 = undefined;
+threadlocal var T: f64 = undefined;
+threadlocal var T2: f64 = undefined;
+threadlocal var T3: f64 = undefined;
+threadlocal var T4: f64 = undefined;
+threadlocal var f: f64 = undefined;
+threadlocal var g: f64 = undefined;
+threadlocal var Ve: f64 = undefined;
+threadlocal var Ea: f64 = undefined;
+threadlocal var Ma: f64 = undefined;
+threadlocal var Ju: f64 = undefined;
+threadlocal var Sa: f64 = undefined;
+threadlocal var cg: f64 = undefined;
+threadlocal var sg: f64 = undefined;
+threadlocal var l1: f64 = undefined;
+threadlocal var l2: f64 = undefined;
+threadlocal var l3: f64 = undefined;
+threadlocal var l4: f64 = undefined;
 
 // swed.pldat[SEI_MOON] equivalent (only fields swi_moshmoon touches)
-var pdp_teval: f64 = 0;
-var pdp_xflgs: i32 = 0;
-var pdp_iephe: i32 = 0;
-var pdp_x: [6]f64 = undefined;
+threadlocal var pdp_teval: f64 = 0;
+threadlocal var pdp_xflgs: i32 = 0;
+threadlocal var pdp_iephe: i32 = 0;
+threadlocal var pdp_x: [6]f64 = undefined;
 
 /// Calculate geometric coordinates of Moon without light time or
 /// nutation correction (swemmoon.c swi_moshmoon2).

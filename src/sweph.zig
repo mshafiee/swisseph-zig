@@ -5342,7 +5342,7 @@ fn atofOffset(buf: *[AS_MAXCH]u8, off: usize) f64 {
 
 // ==================== fixed stars (sweph.c fixstar section) ====================
 
-var fixstar_alloc_buf: []FixedStar = &[_]FixedStar{};
+threadlocal var fixstar_alloc_buf: []FixedStar = &[_]FixedStar{};
 
 fn fsRightTrim(tok: []u8) []u8 {
     var n = tok.len;
@@ -5494,8 +5494,8 @@ fn fixstarCutString(srecord_in: []const u8, star: ?[]u8, stardata: *FixedStar, s
     return OK;
 }
 
-var cpos_buf: [20][AS_MAXCH]u8 = [_][AS_MAXCH]u8{[_]u8{0} ** AS_MAXCH} ** 20;
-var fs_alloc = std.heap.page_allocator;
+threadlocal var cpos_buf: [20][AS_MAXCH]u8 = [_][AS_MAXCH]u8{[_]u8{0} ** AS_MAXCH} ** 20;
+threadlocal var fs_alloc = std.heap.page_allocator;
 
 /// sweph.c save_star_in_struct (realloc pattern -> grow the slice)
 fn saveStarInStruct(nrecs: usize, fstp: *const FixedStar, swed: *Swed, serr: ?[]u8) i32 {
@@ -6441,8 +6441,8 @@ pub fn swe_fixstar2(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swe
     return iflag;
 }
 
-var fixstar_last_stardata: FixedStar = .{};
-var fixstar_slast_starname: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
+threadlocal var fixstar_last_stardata: FixedStar = .{};
+threadlocal var fixstar_slast_starname: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
 
 /// sweph.c swe_fixstar2_ut
 pub fn swe_fixstar2_ut(star: []u8, tjd_ut: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {
@@ -6700,8 +6700,8 @@ pub fn swe_fixstar(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed
     return iflag;
 }
 
-var fixstar_slast_record: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
-var fixstar_slast_starname_old: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
+threadlocal var fixstar_slast_record: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
+threadlocal var fixstar_slast_starname_old: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
 
 /// sweph.c swe_fixstar_ut
 pub fn swe_fixstar_ut(star: []u8, tjd_ut: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {

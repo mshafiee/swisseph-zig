@@ -25,7 +25,7 @@ pub const ARMCS: f64 = (SOLAR_YEAR + 1.0) / SOLAR_YEAR * 360.0;
 pub const SUNSHINE_KEEP_MC_SOUTH: i32 = 0;
 pub const ERR: i32 = -1;
 pub const OK: i32 = 0;
-var saved_sundec: f64 = 99.0;
+threadlocal var saved_sundec: f64 = 99.0;
 
 pub const DEGTORAD: f64 = std.math.pi / 180.0;
 pub const RADTODEG: f64 = 180.0 / std.math.pi;

@@ -58,21 +58,21 @@ const JplSave = struct {
 
 // local globals (swejpl.c): js is calloc'ed in C; the port uses a
 // zero-initialized struct + init flag (identical semantics).
-var js: JplSave = .{};
-var js_is_init: bool = false;
+threadlocal var js: JplSave = .{};
+threadlocal var js_is_init: bool = false;
 
 // interp() function-local statics (TLS in C)
-var np: i32 = 0;
-var nv: i32 = 0;
-var nac: i32 = 0;
-var njk: i32 = 0;
-var twot: f64 = 0.0;
+threadlocal var np: i32 = 0;
+threadlocal var nv: i32 = 0;
+threadlocal var nac: i32 = 0;
+threadlocal var njk: i32 = 0;
+threadlocal var twot: f64 = 0.0;
 
 // state() function-local statics (TLS in C); lpt is transient and stays
 // a local, the others persist across calls exactly like the C statics.
-var irecsz: i32 = 0;
-var nrl: i32 = 0;
-var ncoeffs: i32 = 0;
+threadlocal var irecsz: i32 = 0;
+threadlocal var nrl: i32 = 0;
+threadlocal var ncoeffs: i32 = 0;
 
 const is_wasm = @import("builtin").target.cpu.arch.isWasm();
 fn fread(ptr: [*]u8, size: usize, nitems: usize, stream: ?*anyopaque) usize {

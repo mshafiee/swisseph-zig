@@ -14,11 +14,11 @@ const DeltatCtx = deltat.DeltatCtx;
 const AstroModels = swephlib.AstroModels;
 const SweclCtx = swecl.SweclCtx;
 
-var g_swed: Swed = .{};
-var g_models: AstroModels = .{};
-var g_dctx: DeltatCtx = .{};
-var g_swecl: SweclCtx = .{};
-var g_swehel: swehel.SwehelCtx = .{};
+threadlocal var g_swed: Swed = .{};
+threadlocal var g_models: AstroModels = .{};
+threadlocal var g_dctx: DeltatCtx = .{};
+threadlocal var g_swecl: SweclCtx = .{};
+threadlocal var g_swehel: swehel.SwehelCtx = .{};
 
 const SE_VERSION = "2.10.03";
 const AS_MAXCH: usize = 256;
@@ -367,7 +367,7 @@ pub export fn swe_set_delta_t_userdef(dt: f64) callconv(.c) void {
 }
 const J1972: f64 = 2441317.5;
 const NLEAP_INIT: i32 = 10;
-var g_leap_seconds: [100]i32 = blk: {
+threadlocal var g_leap_seconds: [100]i32 = blk: {
     var arr: [100]i32 = [_]i32{0} ** 100;
     arr[0] = 19720630;
     arr[1] = 19721231;
@@ -398,7 +398,7 @@ var g_leap_seconds: [100]i32 = blk: {
     arr[26] = 20161231;
     break :blk arr;
 };
-var g_leap_done: bool = false;
+threadlocal var g_leap_done: bool = false;
 fn init_leapsec() i32 {
     if (!g_leap_done) {
         g_leap_done = true;
