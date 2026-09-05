@@ -19,9 +19,9 @@ else ifeq ($(findstring BSD,$(UNAME_S)),BSD)
   endif
 else
   ifeq ($(UNAME_M),aarch64)
-    HOST_TRIPLE := aarch64-linux
+    HOST_TRIPLE := aarch64-linux-gnu
   else
-    HOST_TRIPLE := x86_64-linux
+    HOST_TRIPLE := x86_64-linux-gnu
   endif
 endif
 TRIPLES_ALL := x86_64-linux-gnu aarch64-linux-gnu x86_64-freebsd aarch64-freebsd x86_64-macos aarch64-macos x86_64-windows wasm32-freestanding wasm32-wasi
@@ -47,8 +47,8 @@ build:
 all: dist
 dist: linux freebsd macos windows wasm
 linux:
-	@$(MAKE) dist/x86_64-linux
-	@$(MAKE) dist/aarch64-linux
+	@$(MAKE) dist/x86_64-linux-gnu
+	@$(MAKE) dist/aarch64-linux-gnu
 freebsd:
 	@$(MAKE) dist/x86_64-freebsd
 	@$(MAKE) dist/aarch64-freebsd

@@ -91,8 +91,14 @@ Integrity: download `SHA256SUMS` from the release and run
 triple=aarch64-macos ver=2.10.3
 curl -LO "https://github.com/mshafiee/swisseph-zig/releases/download/v${ver}/swisseph-zig-${ver}-${triple}.tar.gz"
 tar xzf "swisseph-zig-${ver}-${triple}.tar.gz"
-cc myprog.c -I"swisseph-zig-${triple}/include" -L"swisseph-zig-${triple}/lib" -lswe -lm -o myprog
+cc myprog.c -I"swisseph-zig-${triple}/include" -L"swisseph-zig-${triple}/lib" \
+   -Wl,-rpath,"$PWD/swisseph-zig-${triple}/lib" -lswe -lm -o myprog
 ```
+
+On macOS the shared library is installed with an `@rpath` install name,
+so the `-Wl,-rpath` flag above (or copying `libswe.dylib` next to the
+executable) is required. Link against `lib/libswe.a` instead to avoid
+runtime library resolution entirely.
 
 ### CLI tools
 
@@ -167,8 +173,8 @@ by the verification gate.
 
 | Target | libswe | Tools |
 |---|---|---|
-| `x86_64-linux` | `.a` + `.so` | ELF bins |
-| `aarch64-linux` | `.a` + `.so` | ELF bins |
+| `x86_64-linux-gnu` | `.a` + `.so` | ELF bins |
+| `aarch64-linux-gnu` | `.a` + `.so` | ELF bins |
 | `x86_64-freebsd` | `.a` + `.so` | ELF bins |
 | `aarch64-freebsd` | `.a` + `.so` | ELF bins |
 | `x86_64-macos` | `.a` + `.dylib` | Mach-O bins |
