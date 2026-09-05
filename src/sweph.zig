@@ -456,6 +456,8 @@ pub const Swed = struct {
     gcdat: GcData = .{},
     // Moshier planet sin/cos workspace (was swemplan file statics; TLS in C)
     plan_ws: @import("swemplan").PlanWs = .{},
+    // JPL ephemeris file handle + interp/state statics (were swejpl file statics)
+    jpl: @import("swejpl").JplCtx = .{},
     ephepath: [AS_MAXCH]u8 = blk: {
         // swi_init_swed_if_start(): strcpy(swed.ephepath, SE_EPHE_PATH)
         var buf: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
@@ -5964,7 +5966,7 @@ fn openJplFile(ss: *[3]f64, fname: [:0]const u8, fpath: [:0]const u8, swed: *Swe
         }
     }
     if (retc == OK) {
-        swed.jpldenum = jplmod.swi_get_jpl_denum();
+        swed.jpldenum = jplmod.swi_get_jpl_denum(swed);
         swed.jpl_file_is_open = true;
         _ = swiSetTidAcc(0, 0, swed.jpldenum, serr, swed, dctx);
     }
