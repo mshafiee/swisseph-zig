@@ -2825,7 +2825,10 @@ pub fn swe_gauquelin_sector(
         }
         if (imeth == 1)
             x0[1] = 0;
-        dgsect.* = houses.swe_house_pos(armc, geopos[1], eps + nutlo[1], 'G', &x0, null);
+        // 'G' never reaches the Sunshine memo in swe_house_pos, so a local
+        // HouseCtx is behaviorally identical to C's shared static here.
+        var gsect_hctx = houses.HouseCtx{};
+        dgsect.* = houses.swe_house_pos(armc, geopos[1], eps + nutlo[1], 'G', &x0, null, &gsect_hctx);
         return lib.OK;
     }
     //

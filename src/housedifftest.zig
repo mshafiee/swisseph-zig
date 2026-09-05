@@ -4,6 +4,9 @@
 const std = @import("std");
 const house = @import("swehouse");
 
+// Sunshine memo (C file static): process-lifetime, like the oracle
+var hctx = house.HouseCtx{};
+
 const Pair = struct { key: u8, idx: u32, val: f64 };
 
 fn parsePair(tok: []const u8) ?Pair {
@@ -109,7 +112,7 @@ fn checkH(line: []const u8) bool {
     var serr: [256]u8 = [_]u8{0} ** 256;
     const cusp_speed: ?*[37]f64 = if ((iflag & 1) != 0) &have_s else null;
     const ascmc_speed: ?*[10]f64 = if ((iflag & 2) != 0) &have_b else null;
-    const retc = house.swe_houses_armc_ex2(armc, geolat, eps, hsys, &have_c, &have_a, cusp_speed, ascmc_speed, &serr);
+    const retc = house.swe_houses_armc_ex2(armc, geolat, eps, hsys, &have_c, &have_a, cusp_speed, ascmc_speed, &serr, &hctx);
 
     if (retc != want_retc)
         return reportH(false, line, @floatFromInt(want_retc), @floatFromInt(retc));
@@ -159,7 +162,7 @@ fn checkP(line: []const u8) bool {
 
     var serr: [256]u8 = [_]u8{0} ** 256;
     const xpin = [6]f64{ x0, x1, 1, 0, 0, 0 };
-    const hp = house.swe_house_pos(armc, geolat, eps, hsys, &xpin, &serr);
+    const hp = house.swe_house_pos(armc, geolat, eps, hsys, &xpin, &serr, &hctx);
     if (!bitsEq(hp, want_hp)) {
         std.debug.print("MISMATCH: {s}\n  want={x} got={x}\n", .{ line, @as(u64, @bitCast(want_hp)), @as(u64, @bitCast(hp)) });
         return false;

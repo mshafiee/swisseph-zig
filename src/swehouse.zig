@@ -25,7 +25,11 @@ pub const ARMCS: f64 = (SOLAR_YEAR + 1.0) / SOLAR_YEAR * 360.0;
 pub const SUNSHINE_KEEP_MC_SOUTH: i32 = 0;
 pub const ERR: i32 = -1;
 pub const OK: i32 = 0;
-threadlocal var saved_sundec: f64 = 99.0;
+/// Sunshine-house memo (was swehouse.c file static saved_sundec; TLS in C).
+/// Lives beside the API: each caller owns one (SweState.house in the ABI).
+pub const HouseCtx = struct {
+    saved_sundec: f64 = 99.0,
+};
 
 pub const DEGTORAD: f64 = std.math.pi / 180.0;
 pub const RADTODEG: f64 = 180.0 / std.math.pi;
@@ -1481,8 +1485,9 @@ pub fn swe_houses_armc(
     hsys: i32,
     cusp: *[37]f64,
     ascmc: *[10]f64,
+    hctx: *HouseCtx,
 ) i32 {
-    return swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc, null, null, null);
+    return swe_houses_armc_ex2(armc, geolat, eps, hsys, cusp, ascmc, null, null, null, hctx);
 }
 
 pub fn swe_houses_armc_ex2(
@@ -1495,6 +1500,7 @@ pub fn swe_houses_armc_ex2(
     cusp_speed: ?*[37]f64,
     ascmc_speed: ?*[10]f64,
     serr: ?*[256]u8,
+    hctx: *HouseCtx,
 ) i32 {
     var h: Houses = undefined;
     var hm1: Houses = undefined;
@@ -1516,10 +1522,10 @@ pub fn swe_houses_armc_ex2(
     if (upper8(hsys) == 'I') {
         if (ascmc[9] == 99.0) {
             h.sundec = 0.0;
-            if (saved_sundec != 99.0) h.sundec = saved_sundec;
+            if (hctx.saved_sundec != 99.0) h.sundec = hctx.saved_sundec;
         } else {
             h.sundec = ascmc[9];
-            saved_sundec = h.sundec;
+            hctx.saved_sundec = h.sundec;
         }
         if (h.sundec < -24.0 or h.sundec > 24.0) {
             if (serr != null) {
@@ -1681,6 +1687,7 @@ pub fn swe_house_pos(
     hsys: i32,
     xpin: *const [6]f64,
     serr: ?*[256]u8,
+    hctx: *HouseCtx,
 ) f64 {
     var geolat = geolat_in;
     var xp: [6]f64 = undefined;
@@ -1741,7 +1748,7 @@ pub fn swe_house_pos(
     const hsys_upper = upper8(hsys);
     if (true) {
         ascmc[9] = 99.0;
-        if (swe_houses_armc_ex2(armc, geolat, eps, hsys_upper, &hcusp, &ascmc, null, null, serr) == ERR) {
+        if (swe_houses_armc_ex2(armc, geolat, eps, hsys_upper, &hcusp, &ascmc, null, null, serr, hctx) == ERR) {
             if (serr != null)
                 serrFailed(serr.?, hsys);
         } else {
@@ -2213,7 +2220,7 @@ pub fn swe_house_pos(
         },
         else => {
             hpos = 0.0;
-            if (swe_houses_armc_ex2(armc, geolat, eps, hsys_upper, &hcusp, &ascmc, null, null, serr) == ERR) {
+            if (swe_houses_armc_ex2(armc, geolat, eps, hsys_upper, &hcusp, &ascmc, null, null, serr, hctx) == ERR) {
                 if (serr != null)
                     serrFailed(serr.?, hsys);
             } else {

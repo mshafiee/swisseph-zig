@@ -15,6 +15,10 @@ const AstroModels = swephlib.AstroModels;
 const SweclCtx = swecl.SweclCtx;
 
 threadlocal var g_swed: Swed = .{};
+// Sunshine-house memo (swehouse.c saved_sundec); folded into the threadlocal
+// SweState in the next step — interim module var keeps C's process-global
+// semantics until then.
+var g_house: swehouse.HouseCtx = .{};
 threadlocal var g_models: AstroModels = .{};
 threadlocal var g_dctx: DeltatCtx = .{};
 threadlocal var g_swecl: SweclCtx = .{};
@@ -725,7 +729,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
         _ = sweph.swe_get_ayanamsa_ex(tjde, iflag, &ay, &g_swed, g_models, &g_dctx, null);
         var hsys2: i32 = hsys;
         if (hsys_u == 'W') hsys2 = 'E';
-        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], hsys2, &cs, &asc, csp, ascp, serr_ptr);
+        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], hsys2, &cs, &asc, csp, ascp, serr_ptr, &g_house);
         for (1..ito + 1) |i| {
             cs[i] = swephlib.swe_degnorm(cs[i] - ay);
             if (hsys_u == 'W') {
@@ -745,7 +749,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
         // if Sunshine fallback needed and calc failed, force Porphyry for compatibility (C sets hsys='O')
         var eff_hsys: i32 = hsys;
         if (hsys_u == 'I' and retc_makr < 0) eff_hsys = 'O';
-        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], eff_hsys, &cs, &asc, csp, ascp, serr_ptr);
+        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], eff_hsys, &cs, &asc, csp, ascp, serr_ptr, &g_house);
         if (hsys_u == 'I' and retc_makr >= 0) asc[9] = xp[1];
     }
     if ((iflag & sweph.SEFLG_RADIANS) != 0) {
@@ -777,7 +781,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
 pub export fn swe_houses_armc(armc: f64, geolat: f64, eps: f64, hsys: i32, cusps: [*]f64, ascmc: [*]f64) callconv(.c) i32 {
     var cs: [37]f64 = undefined;
     var asc: [10]f64 = undefined;
-    const ret = swehouse.swe_houses_armc(armc, geolat, eps, hsys, &cs, &asc);
+    const ret = swehouse.swe_houses_armc(armc, geolat, eps, hsys, &cs, &asc, &g_house);
     for (0..13) |i| cusps[i] = cs[i];
     for (0..10) |i| ascmc[i] = asc[i];
     return ret;
@@ -797,7 +801,7 @@ pub export fn swe_houses_armc_ex2(armc: f64, geolat: f64, eps: f64, hsys: i32, c
     var ascp: ?*[10]f64 = null;
     if (cusp_speed) |p| csp = @ptrCast(p);
     if (ascmc_speed) |p| ascp = @ptrCast(p);
-    const ret = swehouse.swe_houses_armc_ex2(armc, geolat, eps, hsys, &cs, &asc, csp, ascp, serr_ptr);
+    const ret = swehouse.swe_houses_armc_ex2(armc, geolat, eps, hsys, &cs, &asc, csp, ascp, serr_ptr, &g_house);
     for (0..13) |i| cusps[i] = cs[i];
     for (0..10) |i| ascmc[i] = asc[i];
     if (csp != null) {
@@ -821,7 +825,7 @@ pub export fn swe_house_pos(armc: f64, geolat: f64, eps: f64, hsys: i32, xpin: [
         serr_ptr = &serr_buf;
         serr_buf[0] = 0;
     }
-    const ret = swehouse.swe_house_pos(armc, geolat, eps, hsys, &xin, serr_ptr);
+    const ret = swehouse.swe_house_pos(armc, geolat, eps, hsys, &xin, serr_ptr, &g_house);
     if (serr != null and serr_ptr != null) {
         const l = std.mem.indexOfScalar(u8, &serr_buf, 0) orelse 0;
         @memcpy(serr.?[0..l], serr_buf[0..l]);
