@@ -11,7 +11,13 @@
 static void *libm_handle(void) {
     static void *h;
     if (h == NULL) {
+#if defined(__APPLE__)
         h = dlopen("/usr/lib/libSystem.B.dylib", RTLD_LAZY | RTLD_GLOBAL);
+#else
+        /* glibc/libm on Linux; RTLD_NOLOAD resolves the already-linked libm */
+        h = dlopen("libm.so.6", RTLD_LAZY | RTLD_GLOBAL);
+        if (h == NULL) h = dlopen(NULL, RTLD_LAZY | RTLD_GLOBAL);
+#endif
         if (h == NULL) abort();
     }
     return h;
