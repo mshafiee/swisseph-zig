@@ -8,6 +8,7 @@ const swephlib = @import("swephlib");
 const swehouse = @import("swehouse");
 const swecl = @import("swecl");
 const swehel = @import("swehel");
+const jplmod = @import("swejpl");
 
 const Swed = sweph.Swed;
 const DeltatCtx = deltat.DeltatCtx;
@@ -24,14 +25,21 @@ pub const SweState = struct {
     cctx: SweclCtx = .{},
     hctx: swehel.SwehelCtx = .{},
 
-    /// Frees heap-owned members (fixstar backing buffer). Safe to call on
-    /// a default/never-used state.
+    /// Frees heap-owned members (fixstar backing buffer) and resets the
+    /// fixstar memo state, so a later swe_fixstar2 cleanly re-loads.
+    /// Safe to call on a default/never-used state.
     pub fn deinit(self: *SweState) void {
         if (self.swed.fixstar_buf.len > 0) {
             self.swed.fs_alloc.free(self.swed.fixstar_buf);
-            self.swed.fixstar_buf = &[_]sweph.FixedStar{};
-            self.swed.fixed_stars = &[_]sweph.FixedStar{};
         }
+        self.swed.fixstar_buf = &[_]sweph.FixedStar{};
+        self.swed.fixed_stars = &[_]sweph.FixedStar{};
+        // n_fixstars_records still points at the freed slice; the slast_*
+        // memo would match stale star names and index the empty buffer.
+        self.swed.n_fixstars_records = 0;
+        self.swed.fixstar_slast_starname = [_]u8{0} ** self.swed.fixstar_slast_starname.len;
+        self.swed.fixstar_slast_starname_old = [_]u8{0} ** self.swed.fixstar_slast_starname_old.len;
+        self.swed.fixstar_last_stardata = .{};
     }
 };
 
@@ -139,8 +147,26 @@ pub export fn swe_get_library_path(s: [*:0]u8) callconv(.c) [*:0]u8 {
     s[0] = 0;
     return s;
 }
+/// swisseph-zig extension: free the calling thread's per-thread resources
+/// (the fixstar backing buffer, if one was allocated). Optional — call it
+/// after the thread's last swe_* call; long-lived processes that spawn
+/// transient worker threads should call it before the thread exits.
+/// Idempotent; safe on a thread that never used the library.
+pub export fn swe_cleanup() callconv(.c) void {
+    g_state.deinit();
+}
+
 pub export fn swe_close() callconv(.c) void {
-    g_state.swed = .{};
+    // Close the JPL file first: it owns jplfptr and holds a duplicate of
+    // the same FILE* in fidat[SEI_FILE_PLANET]; swi_close_jpl_file closes
+    // the former and nulls the latter so swe_close cannot double-fclose.
+    jplmod.swi_close_jpl_file(&g_state.swed);
+    // Free the fixstar backing buffer BEFORE the bulk reset (swe_close
+    // overwrites swed, which would orphan the allocation).
+    g_state.deinit();
+    // Close every remaining open ephemeris file handle and reset the bundle
+    // (sweph.c swe_close semantics).
+    sweph.swe_close(&g_state.swed);
     g_state.models = .{};
     g_state.dctx = .{};
 }
@@ -1301,7 +1327,7 @@ pub export fn swe_fixstar(star: [*:0]u8, tjd: f64, iflag: i32, xx: [*]f64, serr:
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar(buf[0..len], tjd, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar(buf[0..], tjd, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);
@@ -1314,7 +1340,7 @@ pub export fn swe_fixstar_ut(star: [*:0]u8, tjd_ut: f64, iflag: i32, xx: [*]f64,
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar_ut(buf[0..len], tjd_ut, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar_ut(buf[0..], tjd_ut, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);
@@ -1325,7 +1351,7 @@ pub export fn swe_fixstar_mag(star: [*:0]u8, mag: *f64, serr: ?[*:0]u8) callconv
     const len = std.mem.len(star);
     var buf: [256]u8 = undefined;
     @memcpy(buf[0..len], star[0..len]);
-    return sweph.swe_fixstar_mag(buf[0..len], mag, &g_state.swed, serrToZig(serr));
+    return sweph.swe_fixstar_mag(buf[0..], mag, &g_state.swed, serrToZig(serr));
 }
 pub export fn swe_fixstar2(star: [*:0]u8, tjd: f64, iflag: i32, xx: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     const len = std.mem.len(star);
@@ -1333,7 +1359,7 @@ pub export fn swe_fixstar2(star: [*:0]u8, tjd: f64, iflag: i32, xx: [*]f64, serr
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar2(buf[0..len], tjd, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar2(buf[0..], tjd, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);

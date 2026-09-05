@@ -1013,6 +1013,13 @@ ext_def( char *) swe_cs2degstr(CSEC t, char *a);
 
 #endif  /* #ifndef _SWEDLL_H */
 
+/* ---- swisseph-zig extensions (not part of upstream Swiss Ephemeris) ---- */
+#ifdef SWE_ZIG_EXTENSIONS
+/* Free the calling thread's per-thread resources (the fixstar cache).
+ * Optional; call after the thread's last swe_* call. Idempotent. */
+ext_def( void ) swe_cleanup(void);
+#endif
+
 #endif  /* #ifndef _SWEPHEXP_INCLUDED */
 
 #ifdef __cplusplus

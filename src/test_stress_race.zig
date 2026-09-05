@@ -18,6 +18,7 @@ const deltat = @import("deltat");
 const lib = @import("swephlib");
 const swehouse = @import("swehouse");
 const swemmoon = @import("swemmoon");
+const abi = @import("swe_abi");
 
 const N_WORKERS = 32; // heavy oversubscription vs typical 8-10 cores
 const N_SEQ = 40; // mixed ops per worker per round
@@ -172,7 +173,6 @@ const N_ABI_WORKERS = 8;
 const N_ABI_CALLS = 200;
 
 pub fn abiRaceCheck() !void {
-    const abi = @import("swe_abi");
     // serial reference on this thread
     var ref: [N_ABI_CALLS][6]f64 = undefined;
     var xx: [6]f64 = undefined;
@@ -224,4 +224,90 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("== ABI race check: {d} threads x {d} calls ==\n", .{ N_ABI_WORKERS, N_ABI_CALLS });
     try abiRaceCheck();
     std.debug.print("ALL RACE CHECKS PASSED\n", .{});
+}
+
+// ── ABI resource management (swe_close / swe_cleanup) ────────────────────
+
+/// Count open file descriptors via /dev/fd (macOS) or /proc/self/fd (Linux).
+fn countOpenFds(io: std.Io) usize {
+    const dir = std.Io.Dir.openDirAbsolute(io, "/dev/fd", .{ .iterate = true }) catch
+        (std.Io.Dir.openDirAbsolute(io, "/proc/self/fd", .{ .iterate = true }) catch
+            return 0);
+    defer dir.close(io);
+    var it = dir.iterate();
+    var n: usize = 0;
+    while (it.next(io) catch null) |_| n += 1;
+    return n;
+}
+
+fn epheAvailable(io: std.Io) bool {
+    const cwd = std.Io.Dir.cwd();
+    cwd.access(io, "../ephe/de406.eph", .{}) catch return false;
+    cwd.access(io, "../ephe/sefstars.txt", .{}) catch return false;
+    return true;
+}
+
+test "ABI swe_close: 100 JPL close/reopen cycles leak no file descriptors" {
+    if (!epheAvailable(std.testing.io)) return; // skip-safe without ephe data
+    abi.swe_set_ephe_path("../ephe");
+    const before = countOpenFds(std.testing.io);
+    var name_buf: [64]u8 = undefined;
+    var xx: [6]f64 = undefined;
+    for (0..100) |_| {
+        const jplname = std.fmt.bufPrintZ(&name_buf, "../ephe/de406.eph", .{}) catch unreachable;
+        abi.swe_set_jpl_file(jplname.ptr);
+        _ = abi.swe_calc(2433282.5, SE_MOON, lib.SEFLG_JPLEPH, &xx, null);
+        abi.swe_close();
+    }
+    const after = countOpenFds(std.testing.io);
+    // the fix closes every handle per cycle; a leak would be +100 here
+    const delta = after - @min(before, after);
+    try std.testing.expect(delta <= 2);
+}
+
+test "ABI swe_cleanup: idempotent, fixstar cache re-grows correctly" {
+    if (!epheAvailable(std.testing.io)) return; // skip-safe without ephe data
+    abi.swe_set_ephe_path("../ephe");
+    var star_buf: [64]u8 = undefined;
+    const star = std.fmt.bufPrintZ(&star_buf, "Sirius", .{}) catch unreachable;
+    var xx: [6]f64 = undefined;
+
+    // allocate the fixstar cache, then free it twice
+    const ret0 = abi.swe_fixstar2(star.ptr, 2451545.0, 0, &xx, null);
+    std.debug.print("DBG2 ret0={d} star_now={s}\n", .{ ret0, std.mem.sliceTo(star.ptr, 0) });
+    abi.swe_cleanup();
+    abi.swe_cleanup(); // idempotent
+
+    // cache must re-grow and produce identical results
+    var first: [6]f64 = undefined;
+    var serr: [256:0]u8 = [_:0]u8{0} ** 256;
+    const star2 = std.fmt.bufPrintZ(&star_buf, "Sirius", .{}) catch unreachable; // fresh buffer: undo write-back
+    const ret = abi.swe_fixstar2(star2.ptr, 2451545.0, 0, &first, &serr);
+    std.debug.print("DBG ret={d} serr={s}\n", .{ ret, std.mem.sliceTo(&serr, 0) });
+    try std.testing.expect(ret >= 0);
+    abi.swe_cleanup();
+    const star3 = std.fmt.bufPrintZ(&star_buf, "Sirius", .{}) catch unreachable;
+    const ret2 = abi.swe_fixstar2(star3.ptr, 2451545.0, 0, &xx, &serr);
+    std.debug.print("DBG ret2={d} serr={s}\n", .{ ret2, std.mem.sliceTo(&serr, 0) });
+    try std.testing.expect(ret2 >= 0);
+    for (0..6) |k| {
+        try std.testing.expectEqual(
+            @as(u64, @bitCast(first[k])),
+            @as(u64, @bitCast(xx[k])),
+        );
+    }
+}
+
+test "ABI swe_close on a virgin thread is a safe no-op" {
+    const t = std.Thread.spawn(.{}, struct {
+        fn run() !void {
+            abi.swe_close(); // nothing open, no buffer: must not crash
+            var xx: [6]f64 = undefined;
+            const ret = abi.swe_calc(2451545.0, SE_MOON, lib.SEFLG_MOSEPH, &xx, null);
+            try std.testing.expect(ret >= 0);
+            abi.swe_close();
+            abi.swe_cleanup();
+        }
+    }.run, .{}) catch unreachable;
+    t.join();
 }

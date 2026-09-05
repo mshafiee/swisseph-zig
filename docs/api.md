@@ -88,10 +88,10 @@ bundle across threads requires external locking (then results are
 deterministic — verified by `zig build test`).
 
 The C-ABI layer exposes the same engine behind a `threadlocal SweState`
-(one isolated C-API instance per OS thread, mirroring C TLS statics):
-
-```zig
-swe.swe_abi.SweState.deinit(...); // frees the fixstar buffer at teardown
-```
+(one isolated C-API instance per OS thread, mirroring C TLS statics).
+For C users: `swe_close()` closes open ephemeris files and frees the calling
+thread's caches; the additional `swe_cleanup()` export (guarded by
+`SWE_ZIG_EXTENSIONS` in the shipped headers) frees just the fixstar cache.
+From Zig, call `swe_abi.SweState.deinit()` on your own bundle instead.
 
 See the “Threading contract” section in README.md.

@@ -133,7 +133,8 @@ by the verification gate.
 `swe_degnorm`, `swe_radnorm`, `swe_difdeg2n`, `swe_difrad2n`, `swe_difdegn`,
 `swe_deg_midp`, `swe_rad_midp`, `swe_split_deg`, `swe_csnorm`, `swe_difcsn`,
 `swe_difcs2n`, `swe_csroundsec`, `swe_d2l`, `swe_day_of_week`,
-`swe_cs2timestr`, `swe_cs2lonlatstr`, `swe_cs2degstr`, …
+`swe_cs2timestr`, `swe_cs2lonlatstr`, `swe_cs2degstr`, … plus the
+`swe_cleanup` swisseph-zig extension.
 </details>
 
 ## Targets
