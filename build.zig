@@ -193,6 +193,39 @@ pub fn build(b: *std.Build) void {
         const thr_tests = b.addTest(.{ .root_module = thr_mod });
         test_step.dependOn(&b.addRunArtifact(thr_tests).step);
 
+        // Heavy multithreaded race test: 16 threads with independent context
+        // bundles, mixed ephemerides (JPL/SWIEPH/Moshier), fixstar, houses,
+        // sidereal toggling — bit-exact vs single-threaded reference. Plus an
+        // 8-thread ABI threadlocal stress.
+        const stress_mod = b.createModule(.{ .root_source_file = b.path("src/test_stress_race.zig"), .target = target, .optimize = optimize });
+        stress_mod.addOptions("build_options", build_options);
+        stress_mod.addImport("sweph", sweph);
+        stress_mod.addImport("swephlib", swephlib);
+        stress_mod.addImport("deltat", deltat);
+        stress_mod.addImport("swedate", swedate);
+        stress_mod.addImport("swehouse", swehouse);
+        stress_mod.addImport("swemmoon", swemmoon);
+        stress_mod.addImport("swecl", swecl);
+        stress_mod.addImport("swehel", swehel);
+        stress_mod.addImport("swemplan", swemplan);
+        stress_mod.addImport("swejpl", swejpl);
+        stress_mod.addImport("swe_abi", swe_abi);
+        stress_mod.link_libc = true;
+        const stress_tests = b.addTest(.{ .root_module = stress_mod });
+        test_step.dependOn(&b.addRunArtifact(stress_tests).step);
+
+        // Race stress runner: `zig build run-stress` executes the heavy
+        // multithreaded race check as an executable (ReleaseSafe).
+        // NOTE: -Dtsan (ThreadSanitizer) is intentionally not offered:
+        // LLVM does not support TSan on aarch64-macos (runtime segfaults at
+        // init) and the x86_64-macos cross build fails compiling libtsan.
+        const run_stress_step = b.step("run-stress", "run the heavy multithreaded race stress test");
+        const stress_runner = b.addExecutable(.{
+            .name = "stress-race",
+            .root_module = stress_mod,
+        });
+        run_stress_step.dependOn(&b.addRunArtifact(stress_runner).step);
+
         // zig-difftest: recomputes the 21 verification corpora bit-for-bit
         // (drives the swisseph-zig-verify harness; corpus files live there).
         const dt_mod = b.createModule(.{ .root_source_file = b.path("src/difftest.zig"), .target = target, .optimize = optimize });
