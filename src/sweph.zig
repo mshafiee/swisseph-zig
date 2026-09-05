@@ -5356,7 +5356,6 @@ fn atofOffset(buf: *[AS_MAXCH]u8, off: usize) f64 {
 
 // ==================== fixed stars (sweph.c fixstar section) ====================
 
-threadlocal var fixstar_alloc_buf: []FixedStar = &[_]FixedStar{};
 
 fn fsRightTrim(tok: []u8) []u8 {
     var n = tok.len;
@@ -5511,13 +5510,12 @@ fn fixstarCutString(srecord_in: []const u8, star: ?[]u8, stardata: *FixedStar, s
     return OK;
 }
 
-threadlocal var fs_alloc = std.heap.page_allocator;
 
 /// sweph.c save_star_in_struct (realloc pattern -> grow the slice)
 fn saveStarInStruct(nrecs: usize, fstp: *const FixedStar, swed: *Swed, serr: ?[]u8) i32 {
-    if (fixstar_alloc_buf.len < nrecs) {
-        const newlen = if (fixstar_alloc_buf.len == 0) 128 else fixstar_alloc_buf.len * 2;
-        const newbuf = fs_alloc.realloc(fixstar_alloc_buf, newlen) catch {
+    if (swed.fixstar_buf.len < nrecs) {
+        const newlen = if (swed.fixstar_buf.len == 0) 128 else swed.fixstar_buf.len * 2;
+        const newbuf = swed.fs_alloc.realloc(swed.fixstar_buf, newlen) catch {
             if (serr) |sr| {
                 const msg = "error in function load_all_fixed_stars(): could not resize fixed stars array";
                 const m = @min(msg.len, sr.len - 1);
@@ -6457,8 +6455,6 @@ pub fn swe_fixstar2(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swe
     return iflag;
 }
 
-threadlocal var fixstar_last_stardata: FixedStar = .{};
-threadlocal var fixstar_slast_starname: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
 
 /// sweph.c swe_fixstar2_ut
 pub fn swe_fixstar2_ut(star: []u8, tjd_ut: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {
@@ -6716,8 +6712,6 @@ pub fn swe_fixstar(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed
     return iflag;
 }
 
-threadlocal var fixstar_slast_record: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
-threadlocal var fixstar_slast_starname_old: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
 
 /// sweph.c swe_fixstar_ut
 pub fn swe_fixstar_ut(star: []u8, tjd_ut: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, serr: ?[]u8) i32 {
