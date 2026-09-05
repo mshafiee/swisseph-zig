@@ -162,5 +162,35 @@ pub fn build(b: *std.Build) void {
         const smoke_tests = b.addTest(.{ .root_module = smoke_mod });
         const test_step = b.step("test", "Run unit tests");
         test_step.dependOn(&b.addRunArtifact(smoke_tests).step);
+
+        // Thread-safety test: N threads × M calls on independent Swed contexts
+        const ts_mod = b.createModule(.{ .root_source_file = b.path("verify/concurrent/thread_safety_test.zig"), .target = target, .optimize = optimize });
+        ts_mod.addImport("sweph", sweph);
+        ts_mod.addImport("swephlib", swephlib);
+        ts_mod.addImport("deltat", deltat);
+        ts_mod.addImport("swedate", swedate);
+        ts_mod.addCSourceFile(.{ .file = b.path("src/libmshim.c"), .flags = &.{} });
+        ts_mod.link_libc = true;
+        const ts_tests = b.addTest(.{ .root_module = ts_mod });
+        test_step.dependOn(&b.addRunArtifact(ts_tests).step);
+
+        // zig-difftest: recomputes the 21 verification corpora bit-for-bit
+        // (drives the swisseph-zig-verify harness; corpus files live there).
+        const dt_mod = b.createModule(.{ .root_source_file = b.path("src/difftest.zig"), .target = target, .optimize = optimize });
+        dt_mod.addOptions("build_options", build_options);
+        dt_mod.addImport("swedate", swedate);
+        dt_mod.addImport("deltat", deltat);
+        dt_mod.addImport("swephlib", swephlib);
+        dt_mod.addImport("swemmoon", swemmoon);
+        dt_mod.addImport("swemplan", swemplan);
+        dt_mod.addImport("swejpl", swejpl);
+        dt_mod.addImport("sweph", sweph);
+        dt_mod.addImport("swecl", swecl);
+        dt_mod.addImport("swehouse", swehouse);
+        dt_mod.addImport("swehel", swehel);
+        dt_mod.addCSourceFile(.{ .file = b.path("src/libmshim.c"), .flags = &.{} });
+        dt_mod.link_libc = true;
+        const difftest = b.addExecutable(.{ .name = "zig-difftest", .root_module = dt_mod });
+        b.installArtifact(difftest);
     }
 }
