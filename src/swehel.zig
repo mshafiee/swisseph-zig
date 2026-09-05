@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
 // Swiss Ephemeris Zig port — swehel module (heliacal events).
-// Port of swehel.c; see docs/parity.md for the bit-parity contract.
+// Port of swehel.c; see docs/guide/03-parity.md for the bit-parity contract.
 // C function-local statics live in SwehelCtx (order-dependent, like C).
 const std = @import("std");
 const lib = @import("swephlib");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
 // Swiss Ephemeris Zig port — swephlib module (shared helpers).
-// Port of swephlib.c; see docs/parity.md for the bit-parity contract.
+// Port of swephlib.c; see docs/guide/03-parity.md for the bit-parity contract.
 const std = @import("std");
 
 // Platform libm via shim (see libmshim.c) or pure Zig std.math when -Dpure

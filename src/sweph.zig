@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
 // Swiss Ephemeris Zig port — sweph module (swe_calc orchestration).
-// Port of sweph.c; see docs/parity.md for the bit-parity contract.
-// The C `swed` global is an explicit `Swed` struct; see docs/api.md.
+// Port of sweph.c; see docs/guide/03-parity.md for the bit-parity contract.
+// The C `swed` global is an explicit `Swed` struct; see docs/guide/01-api.md.
 const std = @import("std");
 const lib = @import("swephlib");
 const deltat = @import("deltat");
