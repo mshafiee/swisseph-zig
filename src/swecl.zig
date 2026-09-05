@@ -1638,7 +1638,7 @@ pub fn swe_nod_aps(
             var mdnode: f64 = undefined;
             var mperi: f64 = undefined;
             var mdperi: f64 = undefined;
-            swemmoon_mod.swi_mean_lunar_elements(tjd_et, &mnode, &mdnode, &mperi, &mdperi);
+            swemmoon_mod.swi_mean_lunar_elements(tjd_et, &mnode, &mdnode, &mperi, &mdperi, &swed.moon_ws);
             xna[0] = mnode;
             xna[3] = mdnode;
             xpe[0] = mperi;

@@ -231,60 +231,64 @@ const NLRT2: usize = 25;
 const NBT2: usize = 12;
 
 // --- file static state (swemmoon.c; TLS in C, plain here) ---
-threadlocal var ss: [5][8]f64 = undefined;
-threadlocal var cc: [5][8]f64 = undefined;
-threadlocal var l: f64 = undefined; // Moon's ecliptic longitude
-threadlocal var B: f64 = undefined; // Ecliptic latitude
-threadlocal var moonpol: [3]f64 = undefined;
-threadlocal var SWELP: f64 = undefined;
-threadlocal var M: f64 = undefined;
-threadlocal var MP: f64 = undefined;
-threadlocal var D: f64 = undefined;
-threadlocal var NF: f64 = undefined;
-threadlocal var T: f64 = undefined;
-threadlocal var T2: f64 = undefined;
-threadlocal var T3: f64 = undefined;
-threadlocal var T4: f64 = undefined;
-threadlocal var f: f64 = undefined;
-threadlocal var g: f64 = undefined;
-threadlocal var Ve: f64 = undefined;
-threadlocal var Ea: f64 = undefined;
-threadlocal var Ma: f64 = undefined;
-threadlocal var Ju: f64 = undefined;
-threadlocal var Sa: f64 = undefined;
-threadlocal var cg: f64 = undefined;
-threadlocal var sg: f64 = undefined;
-threadlocal var l1: f64 = undefined;
-threadlocal var l2: f64 = undefined;
-threadlocal var l3: f64 = undefined;
-threadlocal var l4: f64 = undefined;
-
-// swed.pldat[SEI_MOON] equivalent (only fields swi_moshmoon touches)
-threadlocal var pdp_teval: f64 = 0;
-threadlocal var pdp_xflgs: i32 = 0;
-threadlocal var pdp_iephe: i32 = 0;
-threadlocal var pdp_x: [6]f64 = undefined;
+/// Moshier moon workspace + save area (was swemmoon.c file statics; TLS
+/// there). Lives in Swed so each instance owns its computation context:
+/// ss/cc are lazily built per date range, pdp_* is the moon position cache
+/// (swed.pldat[SEI_MOON] equivalent fields swi_moshmoon touches).
+pub const MoonWs = struct {
+    ss: [5][8]f64 = undefined,
+    cc: [5][8]f64 = undefined,
+    l: f64 = undefined, // Moon's ecliptic longitude
+    B: f64 = undefined, // Ecliptic latitude
+    moonpol: [3]f64 = undefined,
+    SWELP: f64 = undefined,
+    M: f64 = undefined,
+    MP: f64 = undefined,
+    D: f64 = undefined,
+    NF: f64 = undefined,
+    T: f64 = undefined,
+    T2: f64 = undefined,
+    T3: f64 = undefined,
+    T4: f64 = undefined,
+    f: f64 = undefined,
+    g: f64 = undefined,
+    Ve: f64 = undefined,
+    Ea: f64 = undefined,
+    Ma: f64 = undefined,
+    Ju: f64 = undefined,
+    Sa: f64 = undefined,
+    cg: f64 = undefined,
+    sg: f64 = undefined,
+    l1: f64 = undefined,
+    l2: f64 = undefined,
+    l3: f64 = undefined,
+    l4: f64 = undefined,
+    pdp_teval: f64 = 0,
+    pdp_xflgs: i32 = 0,
+    pdp_iephe: i32 = 0,
+    pdp_x: [6]f64 = undefined,
+};
 
 /// Calculate geometric coordinates of Moon without light time or
 /// nutation correction (swemmoon.c swi_moshmoon2).
-pub fn swi_moshmoon2(J: f64, pol: *[3]f64) i32 {
-    T = (J - J2000) / 36525.0;
-    T2 = T * T;
-    mean_elements();
-    mean_elements_pl();
-    moon1();
-    moon2();
-    moon3();
-    moon4();
+pub fn swi_moshmoon2(J: f64, pol: *[3]f64, ws: *MoonWs) i32 {
+    ws.T = (J - J2000) / 36525.0;
+    ws.T2 = ws.T * ws.T;
+    mean_elements(ws);
+    mean_elements_pl(ws);
+    moon1(ws);
+    moon2(ws);
+    moon3(ws);
+    moon4(ws);
     var i: usize = 0;
     while (i < 3) : (i += 1)
-        pol[i] = moonpol[i];
+        pol[i] = ws.moonpol[i];
     return 0;
 }
 
 /// Moshier's moon (swemmoon.c swi_moshmoon); `oec` is swed.oec and
 /// `models` the astro_models entries (both threaded explicitly).
-pub fn swi_moshmoon(tjd: f64, do_save: bool, xpmret: ?*[6]f64, oec: *const Eps, models: AstroModels, serr: ?[]u8) i32 {
+pub fn swi_moshmoon(tjd: f64, do_save: bool, xpmret: ?*[6]f64, oec: *const Eps, models: AstroModels, serr: ?[]u8, ws: *MoonWs) i32 {
     var a: f64 = undefined;
     var b: f64 = undefined;
     var x1: [6]f64 = undefined;
@@ -302,37 +306,37 @@ pub fn swi_moshmoon(tjd: f64, do_save: bool, xpmret: ?*[6]f64, oec: *const Eps, 
         return ERR;
     }
     // if moon has already been computed
-    if (tjd == pdp_teval and pdp_iephe == SEFLG_MOSEPH) {
+    if (tjd == ws.pdp_teval and ws.pdp_iephe == SEFLG_MOSEPH) {
         if (xpmret != null) {
             var i: usize = 0;
             while (i <= 5) : (i += 1)
-                xpmret.?[i] = pdp_x[i];
+                xpmret.?[i] = ws.pdp_x[i];
         }
         return OK;
     }
     // else compute moon (writes pol[0..2]; mirrors C writing xpm[0..2])
-    const xpm: *[6]f64 = if (do_save) &pdp_x else &xx;
+    const xpm: *[6]f64 = if (do_save) &ws.pdp_x else &xx;
     {
         var tmp3: [3]f64 = undefined;
-        _ = swi_moshmoon2(tjd, &tmp3);
+        _ = swi_moshmoon2(tjd, &tmp3, ws);
         xpm[0] = tmp3[0];
         xpm[1] = tmp3[1];
         xpm[2] = tmp3[2];
     }
     if (do_save) {
-        pdp_teval = tjd;
-        pdp_xflgs = -1;
-        pdp_iephe = SEFLG_MOSEPH;
+        ws.pdp_teval = tjd;
+        ws.pdp_xflgs = -1;
+        ws.pdp_iephe = SEFLG_MOSEPH;
     }
     // Moshier moon is referred to ecliptic of date; convert to
     // equatorial J2000.
     ecldat_equ2000(tjd, xpm, oec, models);
     // speed from two other positions
     t = tjd + MOON_SPEED_INTV;
-    _ = swi_moshmoon2(t, x1[0..3]);
+    _ = swi_moshmoon2(t, x1[0..3], ws);
     ecldat_equ2000(t, &x1, oec, models);
     t = tjd - MOON_SPEED_INTV;
-    _ = swi_moshmoon2(t, x2[0..3]);
+    _ = swi_moshmoon2(t, x2[0..3], ws);
     ecldat_equ2000(t, &x2, oec, models);
     var i: usize = 0;
     while (i <= 2) : (i += 1) {
@@ -379,326 +383,326 @@ fn mods3600(x: f64) f64 {
     return lx;
 }
 
-pub fn swi_mean_lunar_elements(tjd: f64, node: *f64, dnode: *f64, peri: *f64, dperi: *f64) void {
+pub fn swi_mean_lunar_elements(tjd: f64, node: *f64, dnode: *f64, peri: *f64, dperi: *f64, ws: *MoonWs) void {
     var dcor: f64 = undefined;
-    T = (tjd - J2000) / 36525.0;
-    T2 = T * T;
-    mean_elements();
-    node.* = swe_degnorm((SWELP - NF) * STR * RADTODEG);
-    peri.* = swe_degnorm((SWELP - MP) * STR * RADTODEG);
-    T -= 1.0 / 36525.0;
-    mean_elements();
-    dnode.* = swe_degnorm(node.* - (SWELP - NF) * STR * RADTODEG);
+    ws.T = (tjd - J2000) / 36525.0;
+    ws.T2 = ws.T * ws.T;
+    mean_elements(ws);
+    node.* = swe_degnorm((ws.SWELP - ws.NF) * STR * RADTODEG);
+    peri.* = swe_degnorm((ws.SWELP - ws.MP) * STR * RADTODEG);
+    ws.T -= 1.0 / 36525.0;
+    mean_elements(ws);
+    dnode.* = swe_degnorm(node.* - (ws.SWELP - ws.NF) * STR * RADTODEG);
     dnode.* -= 360;
-    dperi.* = swe_degnorm(peri.* - (SWELP - MP) * STR * RADTODEG);
+    dperi.* = swe_degnorm(peri.* - (ws.SWELP - ws.MP) * STR * RADTODEG);
     dcor = corr_mean_node(tjd);
     node.* = swe_degnorm(node.* - dcor);
     dcor = corr_mean_apog(tjd);
     peri.* = swe_degnorm(peri.* - dcor);
 }
 
-fn mean_elements() void {
-    const fracT = swe_shim_fmod(T, 1);
-    // Mean anomaly of sun = l' (J. Laskar)
-    M = mods3600(129600000.0 * fracT - 3418.961646 * T + 1287104.76154);
-    M += ((((((((1.62e-20 * T - 1.0390e-17) * T - 3.83508e-15) * T + 4.237343e-13) * T + 8.8555011e-11) * T - 4.77258489e-8) * T - 1.1297037031e-5) * T + 1.4732069041e-4) * T - 0.552891801772) * T2;
+fn mean_elements(ws: *MoonWs) void {
+    const fracT = swe_shim_fmod(ws.T, 1);
+    // Mean anomaly of sun = ws.l' (J. Laskar)
+    ws.M = mods3600(129600000.0 * fracT - 3418.961646 * ws.T + 1287104.76154);
+    ws.M += ((((((((1.62e-20 * ws.T - 1.0390e-17) * ws.T - 3.83508e-15) * ws.T + 4.237343e-13) * ws.T + 8.8555011e-11) * ws.T - 4.77258489e-8) * ws.T - 1.1297037031e-5) * ws.T + 1.4732069041e-4) * ws.T - 0.552891801772) * ws.T2;
     // Mean distance of moon from its ascending node = F
-    NF = mods3600(1739232000.0 * fracT + 295263.0983 * T - 2.079419901760e-01 * T + 335779.55755);
-    // Mean anomaly of moon = l
-    MP = mods3600(1717200000.0 * fracT + 715923.4728 * T - 2.035946368532e-01 * T + 485868.28096);
-    // Mean elongation of moon = D
-    D = mods3600(1601856000.0 * fracT + 1105601.4603 * T + 3.962893294503e-01 * T + 1072260.73512);
+    ws.NF = mods3600(1739232000.0 * fracT + 295263.0983 * ws.T - 2.079419901760e-01 * ws.T + 335779.55755);
+    // Mean anomaly of moon = ws.l
+    ws.MP = mods3600(1717200000.0 * fracT + 715923.4728 * ws.T - 2.035946368532e-01 * ws.T + 485868.28096);
+    // Mean elongation of moon = ws.D
+    ws.D = mods3600(1601856000.0 * fracT + 1105601.4603 * ws.T + 3.962893294503e-01 * ws.T + 1072260.73512);
     // Mean longitude of moon, referred to the mean ecliptic and equinox of date
-    SWELP = mods3600(1731456000.0 * fracT + 1108372.83264 * T - 6.784914260953e-01 * T + 785939.95571);
+    ws.SWELP = mods3600(1731456000.0 * fracT + 1108372.83264 * ws.T - 6.784914260953e-01 * ws.T + 785939.95571);
     // Higher degree secular terms found by least squares fit
-    NF += ((z[2] * T + z[1]) * T + z[0]) * T2;
-    MP += ((z[5] * T + z[4]) * T + z[3]) * T2;
-    D += ((z[8] * T + z[7]) * T + z[6]) * T2;
-    SWELP += ((z[11] * T + z[10]) * T + z[9]) * T2;
+    ws.NF += ((z[2] * ws.T + z[1]) * ws.T + z[0]) * ws.T2;
+    ws.MP += ((z[5] * ws.T + z[4]) * ws.T + z[3]) * ws.T2;
+    ws.D += ((z[8] * ws.T + z[7]) * ws.T + z[6]) * ws.T2;
+    ws.SWELP += ((z[11] * ws.T + z[10]) * ws.T + z[9]) * ws.T2;
 }
 
-pub fn mean_elements_pl() void {
+pub fn mean_elements_pl(ws: *MoonWs) void {
     // Mean longitudes of planets (Laskar, Bretagnon)
-    Ve = mods3600(210664136.4335482 * T + 655127.283046);
-    Ve += ((((((((-9.36e-023 * T - 1.95e-20) * T + 6.097e-18) * T + 4.43201e-15) * T + 2.509418e-13) * T - 3.0622898e-10) * T - 2.26602516e-9) * T - 1.4244812531e-5) * T + 0.005871373088) * T2;
-    Ea = mods3600(129597742.26669231 * T + 361679.214649);
-    Ea += ((((((((-1.16e-22 * T + 2.976e-19) * T + 2.8460e-17) * T - 1.08402e-14) * T - 1.226182e-12) * T + 1.7228268e-10) * T + 1.515912254e-7) * T + 8.863982531e-6) * T - 2.0199859001e-2) * T2;
-    Ma = mods3600(68905077.59284 * T + 1279559.78866);
-    Ma += (-1.043e-5 * T + 9.38012e-3) * T2;
-    Ju = mods3600(10925660.428608 * T + 123665.342120);
-    Ju += (1.543273e-5 * T - 3.06037836351e-1) * T2;
-    Sa = mods3600(4399609.65932 * T + 180278.89694);
-    Sa += ((4.475946e-8 * T - 6.874806E-5) * T + 7.56161437443E-1) * T2;
+    ws.Ve = mods3600(210664136.4335482 * ws.T + 655127.283046);
+    ws.Ve += ((((((((-9.36e-023 * ws.T - 1.95e-20) * ws.T + 6.097e-18) * ws.T + 4.43201e-15) * ws.T + 2.509418e-13) * ws.T - 3.0622898e-10) * ws.T - 2.26602516e-9) * ws.T - 1.4244812531e-5) * ws.T + 0.005871373088) * ws.T2;
+    ws.Ea = mods3600(129597742.26669231 * ws.T + 361679.214649);
+    ws.Ea += ((((((((-1.16e-22 * ws.T + 2.976e-19) * ws.T + 2.8460e-17) * ws.T - 1.08402e-14) * ws.T - 1.226182e-12) * ws.T + 1.7228268e-10) * ws.T + 1.515912254e-7) * ws.T + 8.863982531e-6) * ws.T - 2.0199859001e-2) * ws.T2;
+    ws.Ma = mods3600(68905077.59284 * ws.T + 1279559.78866);
+    ws.Ma += (-1.043e-5 * ws.T + 9.38012e-3) * ws.T2;
+    ws.Ju = mods3600(10925660.428608 * ws.T + 123665.342120);
+    ws.Ju += (1.543273e-5 * ws.T - 3.06037836351e-1) * ws.T2;
+    ws.Sa = mods3600(4399609.65932 * ws.T + 180278.89694);
+    ws.Sa += ((4.475946e-8 * ws.T - 6.874806E-5) * ws.T + 7.56161437443E-1) * ws.T2;
 }
 
-fn moon1() void {
+fn moon1(ws: *MoonWs) void {
     var a: f64 = undefined;
-    // initialise ss and cc (Bhanu Pinnamaneni, 17-aug-2009)
+    // initialise ws.ss and ws.cc (Bhanu Pinnamaneni, 17-aug-2009)
     var i: usize = 0;
     while (i < 5) : (i += 1) {
         var j: usize = 0;
         while (j < 8) : (j += 1) {
-            ss[i][j] = 0;
-            cc[i][j] = 0;
+            ws.ss[i][j] = 0;
+            ws.cc[i][j] = 0;
         }
     }
-    sscc(0, STR * D, 6);
-    sscc(1, STR * M, 4);
-    sscc(2, STR * MP, 4);
-    sscc(3, STR * NF, 4);
-    moonpol[0] = 0.0;
-    moonpol[1] = 0.0;
-    moonpol[2] = 0.0;
-    // terms in T^2, scale 1.0 = 10^-5"
-    chewm(&LRT2, NLRT2, 4, 2, &moonpol);
-    chewm(&BT2, NBT2, 4, 4, &moonpol);
-    f = 18 * Ve - 16 * Ea;
-    g = STR * (f - MP); // 18V - 16E - l
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l = 6.367278 * cg + 12.747036 * sg; // t^0
-    l1 = 23123.70 * cg - 10570.02 * sg; // t^1
-    l2 = z[12] * cg + z[13] * sg; // t^2
-    moonpol[2] += 5.01 * cg + 2.72 * sg;
-    g = STR * (10.0 * Ve - 3.0 * Ea - MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.253102 * cg + 0.503359 * sg;
-    l1 += 1258.46 * cg + 707.29 * sg;
-    l2 += z[14] * cg + z[15] * sg;
-    g = STR * (8.0 * Ve - 13.0 * Ea);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.187231 * cg - 0.127481 * sg;
-    l1 += -319.87 * cg - 18.34 * sg;
-    l2 += z[16] * cg + z[17] * sg;
-    a = 4.0 * Ea - 8.0 * Ma + 3.0 * Ju;
-    g = STR * a;
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.866287 * cg + 0.248192 * sg;
-    l1 += 41.87 * cg + 1053.97 * sg;
-    l2 += z[18] * cg + z[19] * sg;
-    g = STR * (a - MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.165009 * cg + 0.044176 * sg;
-    l1 += 4.67 * cg + 201.55 * sg;
-    g = STR * f; // 18V - 16E
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.330401 * cg + 0.661362 * sg;
-    l1 += 1202.67 * cg - 555.59 * sg;
-    l2 += z[20] * cg + z[21] * sg;
-    g = STR * (f - 2.0 * MP); // 18V - 16E - 2l
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.352185 * cg + 0.705041 * sg;
-    l1 += 1283.59 * cg - 586.43 * sg;
-    g = STR * (2.0 * Ju - 5.0 * Sa);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.034700 * cg + 0.160041 * sg;
-    l2 += z[22] * cg + z[23] * sg;
-    g = STR * (SWELP - NF);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.000116 * cg + 7.063040 * sg;
-    l1 += 298.8 * sg;
-    // T^3 terms
-    sg = swe_shim_sin(STR * M);
-    l3 = z[24] * sg;
-    l4 = 0;
-    g = STR * (2.0 * D - M);
-    sg = swe_shim_sin(g);
-    cg = swe_shim_cos(g);
-    moonpol[2] += -0.2655 * cg * T;
-    g = STR * (M - MP);
-    moonpol[2] += -0.1568 * swe_shim_cos(g) * T;
-    g = STR * (M + MP);
-    moonpol[2] += 0.1309 * swe_shim_cos(g) * T;
-    g = STR * (2.0 * (D + M) - MP);
-    sg = swe_shim_sin(g);
-    cg = swe_shim_cos(g);
-    moonpol[2] += 0.5568 * cg * T;
-    l2 += moonpol[0];
-    g = STR * (2.0 * D - M - MP);
-    moonpol[2] += -0.1910 * swe_shim_cos(g) * T;
-    moonpol[1] *= T;
-    moonpol[2] *= T;
-    // terms in T
-    moonpol[0] = 0.0;
-    chewm(&BT, NBT, 4, 4, &moonpol);
-    chewm(&LRT, NLRT, 4, 1, &moonpol);
-    g = STR * (f - MP - NF - 2355767.6); // 18V - 16E - l - F
-    moonpol[1] += -1127.0 * swe_shim_sin(g);
-    g = STR * (f - MP + NF - 235353.6); // 18V - 16E - l + F
-    moonpol[1] += -1123.0 * swe_shim_sin(g);
-    g = STR * (Ea + D + 51987.6);
-    moonpol[1] += 1303.0 * swe_shim_sin(g);
-    g = STR * SWELP;
-    moonpol[1] += 342.0 * swe_shim_sin(g);
-    g = STR * (2.0 * Ve - 3.0 * Ea);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.343550 * cg - 0.000276 * sg;
-    l1 += 105.90 * cg + 336.53 * sg;
-    g = STR * (f - 2.0 * D); // 18V - 16E - 2D
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.074668 * cg + 0.149501 * sg;
-    l1 += 271.77 * cg - 124.20 * sg;
-    g = STR * (f - 2.0 * D - MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.073444 * cg + 0.147094 * sg;
-    l1 += 265.24 * cg - 121.16 * sg;
-    g = STR * (f + 2.0 * D - MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.072844 * cg + 0.145829 * sg;
-    l1 += 265.18 * cg - 121.29 * sg;
-    g = STR * (f + 2.0 * (D - MP));
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.070201 * cg + 0.140542 * sg;
-    l1 += 255.36 * cg - 116.79 * sg;
-    g = STR * (Ea + D - NF);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.288209 * cg - 0.025901 * sg;
-    l1 += -63.51 * cg - 240.14 * sg;
-    g = STR * (2.0 * Ea - 3.0 * Ju + 2.0 * D - MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += 0.077865 * cg + 0.438460 * sg;
-    l1 += 210.57 * cg + 124.84 * sg;
-    g = STR * (Ea - 2.0 * Ma);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.216579 * cg + 0.241702 * sg;
-    l1 += 197.67 * cg + 125.23 * sg;
-    g = STR * (a + MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.165009 * cg + 0.044176 * sg;
-    l1 += 4.67 * cg + 201.55 * sg;
-    g = STR * (a + 2.0 * D - MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.133533 * cg + 0.041116 * sg;
-    l1 += 6.95 * cg + 187.07 * sg;
-    g = STR * (a - 2.0 * D + MP);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.133430 * cg + 0.041079 * sg;
-    l1 += 6.28 * cg + 169.08 * sg;
-    g = STR * (3.0 * Ve - 4.0 * Ea);
-    cg = swe_shim_cos(g);
-    sg = swe_shim_sin(g);
-    l += -0.175074 * cg + 0.003035 * sg;
-    l1 += 49.17 * cg + 150.57 * sg;
-    g = STR * (2.0 * (Ea + D - MP) - 3.0 * Ju + 213534.0);
-    l1 += 158.4 * swe_shim_sin(g);
-    l1 += moonpol[0];
-    a = 0.1 * T; // set amplitude scale of 1.0 = 10^-4 arcsec
-    moonpol[1] *= a;
-    moonpol[2] *= a;
+    sscc(0, STR * ws.D, 6, ws);
+    sscc(1, STR * ws.M, 4, ws);
+    sscc(2, STR * ws.MP, 4, ws);
+    sscc(3, STR * ws.NF, 4, ws);
+    ws.moonpol[0] = 0.0;
+    ws.moonpol[1] = 0.0;
+    ws.moonpol[2] = 0.0;
+    // terms in ws.T^2, scale 1.0 = 10^-5"
+    chewm(&LRT2, NLRT2, 4, 2, &ws.moonpol, ws);
+    chewm(&BT2, NBT2, 4, 4, &ws.moonpol, ws);
+    ws.f = 18 * ws.Ve - 16 * ws.Ea;
+    ws.g = STR * (ws.f - ws.MP); // 18V - 16E - ws.l
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l = 6.367278 * ws.cg + 12.747036 * ws.sg; // t^0
+    ws.l1 = 23123.70 * ws.cg - 10570.02 * ws.sg; // t^1
+    ws.l2 = z[12] * ws.cg + z[13] * ws.sg; // t^2
+    ws.moonpol[2] += 5.01 * ws.cg + 2.72 * ws.sg;
+    ws.g = STR * (10.0 * ws.Ve - 3.0 * ws.Ea - ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.253102 * ws.cg + 0.503359 * ws.sg;
+    ws.l1 += 1258.46 * ws.cg + 707.29 * ws.sg;
+    ws.l2 += z[14] * ws.cg + z[15] * ws.sg;
+    ws.g = STR * (8.0 * ws.Ve - 13.0 * ws.Ea);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.187231 * ws.cg - 0.127481 * ws.sg;
+    ws.l1 += -319.87 * ws.cg - 18.34 * ws.sg;
+    ws.l2 += z[16] * ws.cg + z[17] * ws.sg;
+    a = 4.0 * ws.Ea - 8.0 * ws.Ma + 3.0 * ws.Ju;
+    ws.g = STR * a;
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.866287 * ws.cg + 0.248192 * ws.sg;
+    ws.l1 += 41.87 * ws.cg + 1053.97 * ws.sg;
+    ws.l2 += z[18] * ws.cg + z[19] * ws.sg;
+    ws.g = STR * (a - ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.165009 * ws.cg + 0.044176 * ws.sg;
+    ws.l1 += 4.67 * ws.cg + 201.55 * ws.sg;
+    ws.g = STR * ws.f; // 18V - 16E
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.330401 * ws.cg + 0.661362 * ws.sg;
+    ws.l1 += 1202.67 * ws.cg - 555.59 * ws.sg;
+    ws.l2 += z[20] * ws.cg + z[21] * ws.sg;
+    ws.g = STR * (ws.f - 2.0 * ws.MP); // 18V - 16E - 2l
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.352185 * ws.cg + 0.705041 * ws.sg;
+    ws.l1 += 1283.59 * ws.cg - 586.43 * ws.sg;
+    ws.g = STR * (2.0 * ws.Ju - 5.0 * ws.Sa);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.034700 * ws.cg + 0.160041 * ws.sg;
+    ws.l2 += z[22] * ws.cg + z[23] * ws.sg;
+    ws.g = STR * (ws.SWELP - ws.NF);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.000116 * ws.cg + 7.063040 * ws.sg;
+    ws.l1 += 298.8 * ws.sg;
+    // ws.T^3 terms
+    ws.sg = swe_shim_sin(STR * ws.M);
+    ws.l3 = z[24] * ws.sg;
+    ws.l4 = 0;
+    ws.g = STR * (2.0 * ws.D - ws.M);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.moonpol[2] += -0.2655 * ws.cg * ws.T;
+    ws.g = STR * (ws.M - ws.MP);
+    ws.moonpol[2] += -0.1568 * swe_shim_cos(ws.g) * ws.T;
+    ws.g = STR * (ws.M + ws.MP);
+    ws.moonpol[2] += 0.1309 * swe_shim_cos(ws.g) * ws.T;
+    ws.g = STR * (2.0 * (ws.D + ws.M) - ws.MP);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.moonpol[2] += 0.5568 * ws.cg * ws.T;
+    ws.l2 += ws.moonpol[0];
+    ws.g = STR * (2.0 * ws.D - ws.M - ws.MP);
+    ws.moonpol[2] += -0.1910 * swe_shim_cos(ws.g) * ws.T;
+    ws.moonpol[1] *= ws.T;
+    ws.moonpol[2] *= ws.T;
+    // terms in ws.T
+    ws.moonpol[0] = 0.0;
+    chewm(&BT, NBT, 4, 4, &ws.moonpol, ws);
+    chewm(&LRT, NLRT, 4, 1, &ws.moonpol, ws);
+    ws.g = STR * (ws.f - ws.MP - ws.NF - 2355767.6); // 18V - 16E - ws.l - F
+    ws.moonpol[1] += -1127.0 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.f - ws.MP + ws.NF - 235353.6); // 18V - 16E - ws.l + F
+    ws.moonpol[1] += -1123.0 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea + ws.D + 51987.6);
+    ws.moonpol[1] += 1303.0 * swe_shim_sin(ws.g);
+    ws.g = STR * ws.SWELP;
+    ws.moonpol[1] += 342.0 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * ws.Ve - 3.0 * ws.Ea);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.343550 * ws.cg - 0.000276 * ws.sg;
+    ws.l1 += 105.90 * ws.cg + 336.53 * ws.sg;
+    ws.g = STR * (ws.f - 2.0 * ws.D); // 18V - 16E - 2D
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.074668 * ws.cg + 0.149501 * ws.sg;
+    ws.l1 += 271.77 * ws.cg - 124.20 * ws.sg;
+    ws.g = STR * (ws.f - 2.0 * ws.D - ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.073444 * ws.cg + 0.147094 * ws.sg;
+    ws.l1 += 265.24 * ws.cg - 121.16 * ws.sg;
+    ws.g = STR * (ws.f + 2.0 * ws.D - ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.072844 * ws.cg + 0.145829 * ws.sg;
+    ws.l1 += 265.18 * ws.cg - 121.29 * ws.sg;
+    ws.g = STR * (ws.f + 2.0 * (ws.D - ws.MP));
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.070201 * ws.cg + 0.140542 * ws.sg;
+    ws.l1 += 255.36 * ws.cg - 116.79 * ws.sg;
+    ws.g = STR * (ws.Ea + ws.D - ws.NF);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.288209 * ws.cg - 0.025901 * ws.sg;
+    ws.l1 += -63.51 * ws.cg - 240.14 * ws.sg;
+    ws.g = STR * (2.0 * ws.Ea - 3.0 * ws.Ju + 2.0 * ws.D - ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += 0.077865 * ws.cg + 0.438460 * ws.sg;
+    ws.l1 += 210.57 * ws.cg + 124.84 * ws.sg;
+    ws.g = STR * (ws.Ea - 2.0 * ws.Ma);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.216579 * ws.cg + 0.241702 * ws.sg;
+    ws.l1 += 197.67 * ws.cg + 125.23 * ws.sg;
+    ws.g = STR * (a + ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.165009 * ws.cg + 0.044176 * ws.sg;
+    ws.l1 += 4.67 * ws.cg + 201.55 * ws.sg;
+    ws.g = STR * (a + 2.0 * ws.D - ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.133533 * ws.cg + 0.041116 * ws.sg;
+    ws.l1 += 6.95 * ws.cg + 187.07 * ws.sg;
+    ws.g = STR * (a - 2.0 * ws.D + ws.MP);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.133430 * ws.cg + 0.041079 * ws.sg;
+    ws.l1 += 6.28 * ws.cg + 169.08 * ws.sg;
+    ws.g = STR * (3.0 * ws.Ve - 4.0 * ws.Ea);
+    ws.cg = swe_shim_cos(ws.g);
+    ws.sg = swe_shim_sin(ws.g);
+    ws.l += -0.175074 * ws.cg + 0.003035 * ws.sg;
+    ws.l1 += 49.17 * ws.cg + 150.57 * ws.sg;
+    ws.g = STR * (2.0 * (ws.Ea + ws.D - ws.MP) - 3.0 * ws.Ju + 213534.0);
+    ws.l1 += 158.4 * swe_shim_sin(ws.g);
+    ws.l1 += ws.moonpol[0];
+    a = 0.1 * ws.T; // set amplitude scale of 1.0 = 10^-4 arcsec
+    ws.moonpol[1] *= a;
+    ws.moonpol[2] *= a;
 }
 
-fn moon2() void {
-    // terms in T^0
-    g = STR * (2 * (Ea - Ju + D) - MP + 648431.172);
-    l += 1.14307 * swe_shim_sin(g);
-    g = STR * (Ve - Ea + 648035.568);
-    l += 0.82155 * swe_shim_sin(g);
-    g = STR * (3 * (Ve - Ea) + 2 * D - MP + 647933.184);
-    l += 0.64371 * swe_shim_sin(g);
-    g = STR * (Ea - Ju + 4424.04);
-    l += 0.63880 * swe_shim_sin(g);
-    g = STR * (SWELP + MP - NF + 4.68);
-    l += 0.49331 * swe_shim_sin(g);
-    g = STR * (SWELP - MP - NF + 4.68);
-    l += 0.4914 * swe_shim_sin(g);
-    g = STR * (SWELP + NF + 2.52);
-    l += 0.36061 * swe_shim_sin(g);
-    g = STR * (2.0 * Ve - 2.0 * Ea + 736.2);
-    l += 0.30154 * swe_shim_sin(g);
-    g = STR * (2.0 * Ea - 3.0 * Ju + 2.0 * D - 2.0 * MP + 36138.2);
-    l += 0.28282 * swe_shim_sin(g);
-    g = STR * (2.0 * Ea - 2.0 * Ju + 2.0 * D - 2.0 * MP + 311.0);
-    l += 0.24516 * swe_shim_sin(g);
-    g = STR * (Ea - Ju - 2.0 * D + MP + 6275.88);
-    l += 0.21117 * swe_shim_sin(g);
-    g = STR * (2.0 * (Ea - Ma) - 846.36);
-    l += 0.19444 * swe_shim_sin(g);
-    g = STR * (2.0 * (Ea - Ju) + 1569.96);
-    l -= 0.18457 * swe_shim_sin(g);
-    g = STR * (2.0 * (Ea - Ju) - MP - 55.8);
-    l += 0.18256 * swe_shim_sin(g);
-    g = STR * (Ea - Ju - 2.0 * D + 6490.08);
-    l += 0.16499 * swe_shim_sin(g);
-    g = STR * (Ea - 2.0 * Ju - 212378.4);
-    l += 0.16427 * swe_shim_sin(g);
-    g = STR * (2.0 * (Ve - Ea - D) + MP + 1122.48);
-    l += 0.16088 * swe_shim_sin(g);
-    g = STR * (Ve - Ea - MP + 32.04);
-    l -= 0.15350 * swe_shim_sin(g);
-    g = STR * (Ea - Ju - MP + 4488.88);
-    l += 0.14346 * swe_shim_sin(g);
-    g = STR * (2.0 * (Ve - Ea + D) - MP - 8.64);
-    l += 0.13594 * swe_shim_sin(g);
-    g = STR * (2.0 * (Ve - Ea - D) + 1319.76);
-    l += 0.13432 * swe_shim_sin(g);
-    g = STR * (Ve - Ea - 2.0 * D + MP - 56.16);
-    l -= 0.13122 * swe_shim_sin(g);
-    g = STR * (Ve - Ea + MP + 54.36);
-    l -= 0.12722 * swe_shim_sin(g);
-    g = STR * (3.0 * (Ve - Ea) - MP + 433.8);
-    l += 0.12539 * swe_shim_sin(g);
-    g = STR * (Ea - Ju + MP + 4002.12);
-    l += 0.10994 * swe_shim_sin(g);
-    g = STR * (20.0 * Ve - 21.0 * Ea - 2.0 * D + MP - 317511.72);
-    l += 0.10652 * swe_shim_sin(g);
-    g = STR * (26.0 * Ve - 29.0 * Ea - MP + 270002.52);
-    l += 0.10490 * swe_shim_sin(g);
-    g = STR * (3.0 * Ve - 4.0 * Ea + D - MP - 322765.56);
-    l += 0.10386 * swe_shim_sin(g);
-    g = STR * (SWELP + 648002.556);
-    B = 8.04508 * swe_shim_sin(g);
-    g = STR * (Ea + D + 996048.252);
-    B += 1.51021 * swe_shim_sin(g);
-    g = STR * (f - MP + NF + 95554.332);
-    B += 0.63037 * swe_shim_sin(g);
-    g = STR * (f - MP - NF + 95553.792);
-    B += 0.63014 * swe_shim_sin(g);
-    g = STR * (SWELP - MP + 2.9);
-    B += 0.45587 * swe_shim_sin(g);
-    g = STR * (SWELP + MP + 2.5);
-    B += -0.41573 * swe_shim_sin(g);
-    g = STR * (SWELP - 2.0 * NF + 3.2);
-    B += 0.32623 * swe_shim_sin(g);
-    g = STR * (SWELP - 2.0 * D + 2.5);
-    B += 0.29855 * swe_shim_sin(g);
+fn moon2(ws: *MoonWs) void {
+    // terms in ws.T^0
+    ws.g = STR * (2 * (ws.Ea - ws.Ju + ws.D) - ws.MP + 648431.172);
+    ws.l += 1.14307 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ve - ws.Ea + 648035.568);
+    ws.l += 0.82155 * swe_shim_sin(ws.g);
+    ws.g = STR * (3 * (ws.Ve - ws.Ea) + 2 * ws.D - ws.MP + 647933.184);
+    ws.l += 0.64371 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea - ws.Ju + 4424.04);
+    ws.l += 0.63880 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP + ws.MP - ws.NF + 4.68);
+    ws.l += 0.49331 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP - ws.MP - ws.NF + 4.68);
+    ws.l += 0.4914 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP + ws.NF + 2.52);
+    ws.l += 0.36061 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * ws.Ve - 2.0 * ws.Ea + 736.2);
+    ws.l += 0.30154 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * ws.Ea - 3.0 * ws.Ju + 2.0 * ws.D - 2.0 * ws.MP + 36138.2);
+    ws.l += 0.28282 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * ws.Ea - 2.0 * ws.Ju + 2.0 * ws.D - 2.0 * ws.MP + 311.0);
+    ws.l += 0.24516 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea - ws.Ju - 2.0 * ws.D + ws.MP + 6275.88);
+    ws.l += 0.21117 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * (ws.Ea - ws.Ma) - 846.36);
+    ws.l += 0.19444 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * (ws.Ea - ws.Ju) + 1569.96);
+    ws.l -= 0.18457 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * (ws.Ea - ws.Ju) - ws.MP - 55.8);
+    ws.l += 0.18256 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea - ws.Ju - 2.0 * ws.D + 6490.08);
+    ws.l += 0.16499 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea - 2.0 * ws.Ju - 212378.4);
+    ws.l += 0.16427 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * (ws.Ve - ws.Ea - ws.D) + ws.MP + 1122.48);
+    ws.l += 0.16088 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ve - ws.Ea - ws.MP + 32.04);
+    ws.l -= 0.15350 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea - ws.Ju - ws.MP + 4488.88);
+    ws.l += 0.14346 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * (ws.Ve - ws.Ea + ws.D) - ws.MP - 8.64);
+    ws.l += 0.13594 * swe_shim_sin(ws.g);
+    ws.g = STR * (2.0 * (ws.Ve - ws.Ea - ws.D) + 1319.76);
+    ws.l += 0.13432 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ve - ws.Ea - 2.0 * ws.D + ws.MP - 56.16);
+    ws.l -= 0.13122 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ve - ws.Ea + ws.MP + 54.36);
+    ws.l -= 0.12722 * swe_shim_sin(ws.g);
+    ws.g = STR * (3.0 * (ws.Ve - ws.Ea) - ws.MP + 433.8);
+    ws.l += 0.12539 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea - ws.Ju + ws.MP + 4002.12);
+    ws.l += 0.10994 * swe_shim_sin(ws.g);
+    ws.g = STR * (20.0 * ws.Ve - 21.0 * ws.Ea - 2.0 * ws.D + ws.MP - 317511.72);
+    ws.l += 0.10652 * swe_shim_sin(ws.g);
+    ws.g = STR * (26.0 * ws.Ve - 29.0 * ws.Ea - ws.MP + 270002.52);
+    ws.l += 0.10490 * swe_shim_sin(ws.g);
+    ws.g = STR * (3.0 * ws.Ve - 4.0 * ws.Ea + ws.D - ws.MP - 322765.56);
+    ws.l += 0.10386 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP + 648002.556);
+    ws.B = 8.04508 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.Ea + ws.D + 996048.252);
+    ws.B += 1.51021 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.f - ws.MP + ws.NF + 95554.332);
+    ws.B += 0.63037 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.f - ws.MP - ws.NF + 95553.792);
+    ws.B += 0.63014 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP - ws.MP + 2.9);
+    ws.B += 0.45587 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP + ws.MP + 2.5);
+    ws.B += -0.41573 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP - 2.0 * ws.NF + 3.2);
+    ws.B += 0.32623 * swe_shim_sin(ws.g);
+    ws.g = STR * (ws.SWELP - 2.0 * ws.D + 2.5);
+    ws.B += 0.29855 * swe_shim_sin(ws.g);
 }
 
-fn moon3() void {
-    // terms in T^0
-    moonpol[0] = 0.0;
-    chewm(&LR, NLR, 4, 1, &moonpol);
-    chewm(&MB, NMB, 4, 3, &moonpol);
-    l += (((l4 * T + l3) * T + l2) * T + l1) * T * 1.0e-5;
-    moonpol[0] = SWELP + l + 1.0e-4 * moonpol[0];
-    moonpol[1] = 1.0e-4 * moonpol[1] + B;
-    moonpol[2] = 1.0e-4 * moonpol[2] + 385000.52899; // kilometers
+fn moon3(ws: *MoonWs) void {
+    // terms in ws.T^0
+    ws.moonpol[0] = 0.0;
+    chewm(&LR, NLR, 4, 1, &ws.moonpol, ws);
+    chewm(&MB, NMB, 4, 3, &ws.moonpol, ws);
+    ws.l += (((ws.l4 * ws.T + ws.l3) * ws.T + ws.l2) * ws.T + ws.l1) * ws.T * 1.0e-5;
+    ws.moonpol[0] = ws.SWELP + ws.l + 1.0e-4 * ws.moonpol[0];
+    ws.moonpol[1] = 1.0e-4 * ws.moonpol[1] + ws.B;
+    ws.moonpol[2] = 1.0e-4 * ws.moonpol[2] + 385000.52899; // kilometers
 }
 
 /// Compute final ecliptic polar coordinates
-fn moon4() void {
-    moonpol[2] /= AUNIT / 1000;
-    moonpol[0] = STR * mods3600(moonpol[0]);
-    moonpol[1] = STR * moonpol[1];
-    B = moonpol[1];
+fn moon4(ws: *MoonWs) void {
+    ws.moonpol[2] /= AUNIT / 1000;
+    ws.moonpol[0] = STR * mods3600(ws.moonpol[0]);
+    ws.moonpol[1] = STR * ws.moonpol[1];
+    ws.B = ws.moonpol[1];
 }
 
 const CORR_MNODE_JD_T0GREG: f64 = -3063616.5; // 1 jan -13100 greg.
@@ -718,12 +722,12 @@ fn corr_mean_node(J: f64) f64 {
 }
 
 /// mean lunar node (swemmoon.c swi_mean_node)
-pub fn swi_mean_node(J: f64, pol: *[3]f64, serr: ?[]u8) i32 {
+pub fn swi_mean_node(J: f64, pol: *[3]f64, serr: ?[]u8, ws: *MoonWs) i32 {
     var s: [AS_MAXCH]u8 = undefined;
-    T = (J - J2000) / 36525.0;
-    T2 = T * T;
-    T3 = T * T2;
-    T4 = T2 * T2;
+    ws.T = (J - J2000) / 36525.0;
+    ws.T2 = ws.T * ws.T;
+    ws.T3 = ws.T * ws.T2;
+    ws.T4 = ws.T2 * ws.T2;
     // with elements from swi_moshmoon2(), which are fitted to jpl-ephemeris
     if (J < MOSHNDEPH_START or J > MOSHNDEPH_END) {
         if (serr != null) {
@@ -733,10 +737,10 @@ pub fn swi_mean_node(J: f64, pol: *[3]f64, serr: ?[]u8) i32 {
         }
         return ERR;
     }
-    mean_elements();
+    mean_elements(ws);
     const dcor = corr_mean_node(J) * 3600;
     // longitude
-    pol[0] = lib.swi_mod2PI((SWELP - NF - dcor) * STR);
+    pol[0] = lib.swi_mod2PI((ws.SWELP - ws.NF - dcor) * STR);
     // latitude
     pol[1] = 0.0;
     // distance
@@ -761,12 +765,12 @@ fn corr_mean_apog(J: f64) f64 {
 }
 
 /// mean lunar apogee ('dark moon', 'lilith') (swemmoon.c swi_mean_apog)
-pub fn swi_mean_apog(J: f64, pol: *[3]f64, serr: ?[]u8) i32 {
+pub fn swi_mean_apog(J: f64, pol: *[3]f64, serr: ?[]u8, ws: *MoonWs) i32 {
     var s: [AS_MAXCH]u8 = undefined;
-    T = (J - J2000) / 36525.0;
-    T2 = T * T;
-    T3 = T * T2;
-    T4 = T2 * T2;
+    ws.T = (J - J2000) / 36525.0;
+    ws.T2 = ws.T * ws.T;
+    ws.T3 = ws.T * ws.T2;
+    ws.T4 = ws.T2 * ws.T2;
     // with elements from swi_moshmoon2(), which are fitted to jpl-ephemeris
     if (J < MOSHNDEPH_START or J > MOSHNDEPH_END) {
         if (serr != null) {
@@ -776,8 +780,8 @@ pub fn swi_mean_apog(J: f64, pol: *[3]f64, serr: ?[]u8) i32 {
         }
         return ERR;
     }
-    mean_elements();
-    pol[0] = lib.swi_mod2PI((SWELP - MP) * STR + PI);
+    mean_elements(ws);
+    pol[0] = lib.swi_mod2PI((ws.SWELP - ws.MP) * STR + PI);
     pol[1] = 0;
     pol[2] = MOON_MEAN_DIST * (1 + MOON_MEAN_ECC) / AUNIT; // apogee
     // (Lilith/Dark Moon comment: apogee is projected onto the ecliptic;
@@ -785,7 +789,7 @@ pub fn swi_mean_apog(J: f64, pol: *[3]f64, serr: ?[]u8) i32 {
     var dcor = corr_mean_apog(J) * DEGTORAD;
     pol[0] = lib.swi_mod2PI(pol[0] - dcor);
     // apogee is now projected onto ecliptic
-    var node = (SWELP - NF) * STR;
+    var node = (ws.SWELP - ws.NF) * STR;
     dcor = corr_mean_node(J) * DEGTORAD;
     node = lib.swi_mod2PI(node - dcor);
     pol[0] = lib.swi_mod2PI(pol[0] - node);
@@ -800,7 +804,7 @@ pub fn swi_mean_apog(J: f64, pol: *[3]f64, serr: ?[]u8) i32 {
 }
 
 /// Program to step through the perturbation table (swemmoon.c chewm)
-fn chewm(pt: []const i16, nlines: usize, nangles: usize, typflg: i32, ans: *[3]f64) void {
+fn chewm(pt: []const i16, nlines: usize, nangles: usize, typflg: i32, ans: *[3]f64, ws: *MoonWs) void {
     var idx: usize = 0;
     var i: usize = 0;
     while (i < nlines) : (i += 1) {
@@ -815,8 +819,8 @@ fn chewm(pt: []const i16, nlines: usize, nangles: usize, typflg: i32, ans: *[3]f
                 var k = j;
                 if (j < 0) k = -k; // make angle factor > 0
                 // sin, cos (k*angle) from lookup table
-                var su = ss[m][@as(usize, @intCast(k)) - 1];
-                const cu = cc[m][@as(usize, @intCast(k)) - 1];
+                var su = ws.ss[m][@as(usize, @intCast(k)) - 1];
+                const cu = ws.cc[m][@as(usize, @intCast(k)) - 1];
                 if (j < 0) su = -su; // negative angle factor
                 if (k1 == 0) {
                     // Set sin, cos of first angle.
@@ -876,28 +880,28 @@ fn chewm(pt: []const i16, nlines: usize, nangles: usize, typflg: i32, ans: *[3]f
 
 /// Prepare lookup table of sin and cos ( i*Lj ) for required multiple
 /// angles (swemmoon.c sscc)
-fn sscc(k: usize, arg: f64, n: usize) void {
+fn sscc(k: usize, arg: f64, n: usize, ws: *MoonWs) void {
     const su = swe_shim_sin(arg);
     const cu = swe_shim_cos(arg);
-    ss[k][0] = su; // sin(L)
-    cc[k][0] = cu; // cos(L)
+    ws.ss[k][0] = su; // sin(L)
+    ws.cc[k][0] = cu; // cos(L)
     var sv = 2.0 * su * cu;
     var cv = cu * cu - su * su;
-    ss[k][1] = sv; // sin(2L)
-    cc[k][1] = cv;
+    ws.ss[k][1] = sv; // sin(2L)
+    ws.cc[k][1] = cv;
     var i: usize = 2;
     while (i < n) : (i += 1) {
         const s = su * cv + cu * sv;
         cv = cu * cv - su * sv;
         sv = s;
-        ss[k][i] = sv; // sin( i+1 L )
-        cc[k][i] = cv;
+        ws.ss[k][i] = sv; // sin( i+1 L )
+        ws.cc[k][i] = cv;
     }
 }
 
 /// Calculate geometric coordinates of true interpolated Moon apsides
 /// (swemmoon.c swi_intp_apsides)
-pub fn swi_intp_apsides(J: f64, pol: *[3]f64, ipli: i32) i32 {
+pub fn swi_intp_apsides(J: f64, pol: *[3]f64, ipli: i32, ws: *MoonWs) i32 {
     var dd: f64 = undefined;
     var rsv: [3]f64 = undefined;
     var niter: i32 = 4;
@@ -912,38 +916,38 @@ pub fn swi_intp_apsides(J: f64, pol: *[3]f64, ipli: i32) i32 {
     const fMa: f64 = 686.9798519 / zMP;
     const fJu: f64 = 4332.589348 / zMP;
     const fSa: f64 = 10759.22722 / zMP;
-    T = (J - J2000) / 36525.0;
-    T2 = T * T;
-    T4 = T2 * T2;
-    mean_elements();
-    mean_elements_pl();
-    var sNF = NF;
-    var sD = D;
-    var sLP = SWELP;
-    var sMP = MP;
-    const sM = M;
-    const sVe = Ve;
-    const sEa = Ea;
-    const sMa = Ma;
-    const sJu = Ju;
-    const sSa = Sa;
-    sNF = mods3600(NF);
-    sD = mods3600(D);
-    sLP = mods3600(SWELP);
-    sMP = mods3600(MP);
+    ws.T = (J - J2000) / 36525.0;
+    ws.T2 = ws.T * ws.T;
+    ws.T4 = ws.T2 * ws.T2;
+    mean_elements(ws);
+    mean_elements_pl(ws);
+    var sNF = ws.NF;
+    var sD = ws.D;
+    var sLP = ws.SWELP;
+    var sMP = ws.MP;
+    const sM = ws.M;
+    const sVe = ws.Ve;
+    const sEa = ws.Ea;
+    const sMa = ws.Ma;
+    const sJu = ws.Ju;
+    const sSa = ws.Sa;
+    sNF = mods3600(ws.NF);
+    sD = mods3600(ws.D);
+    sLP = mods3600(ws.SWELP);
+    sMP = mods3600(ws.MP);
     if (ipli == SEI_INTP_PERG) {
-        MP = 0.0;
+        ws.MP = 0.0;
         niter = 5;
     }
     if (ipli == SEI_INTP_APOG) {
-        MP = 648000.0;
+        ws.MP = 648000.0;
         niter = 4;
     }
     var cMP: f64 = 0;
     dd = 18000.0;
     var iii: i32 = 0;
     while (iii <= niter) : (iii += 1) {
-        const dMP = sMP - MP;
+        const dMP = sMP - ws.MP;
         const mLP = sLP - dMP;
         const mNF = sNF - dMP;
         const mD = sD - dMP;
@@ -951,32 +955,32 @@ pub fn swi_intp_apsides(J: f64, pol: *[3]f64, ipli: i32) i32 {
         ii = 0;
         while (ii <= 2) : (ii += 1) {
             const fi: f64 = @floatFromInt(ii);
-            MP = mMP + (fi - 1) * dd;
-            NF = mNF + (fi - 1) * dd / fNF;
-            D = mD + (fi - 1) * dd / fD;
-            SWELP = mLP + (fi - 1) * dd / fLP;
-            M = sM + (fi - 1) * dd / fM;
-            Ve = sVe + (fi - 1) * dd / fVe;
-            Ea = sEa + (fi - 1) * dd / fEa;
-            Ma = sMa + (fi - 1) * dd / fMa;
-            Ju = sJu + (fi - 1) * dd / fJu;
-            Sa = sSa + (fi - 1) * dd / fSa;
-            moon1();
-            moon2();
-            moon3();
-            moon4();
+            ws.MP = mMP + (fi - 1) * dd;
+            ws.NF = mNF + (fi - 1) * dd / fNF;
+            ws.D = mD + (fi - 1) * dd / fD;
+            ws.SWELP = mLP + (fi - 1) * dd / fLP;
+            ws.M = sM + (fi - 1) * dd / fM;
+            ws.Ve = sVe + (fi - 1) * dd / fVe;
+            ws.Ea = sEa + (fi - 1) * dd / fEa;
+            ws.Ma = sMa + (fi - 1) * dd / fMa;
+            ws.Ju = sJu + (fi - 1) * dd / fJu;
+            ws.Sa = sSa + (fi - 1) * dd / fSa;
+            moon1(ws);
+            moon2(ws);
+            moon3(ws);
+            moon4(ws);
             if (ii == 1) {
                 var i: usize = 0;
                 while (i < 3) : (i += 1)
-                    pol[i] = moonpol[i];
+                    pol[i] = ws.moonpol[i];
             }
-            rsv[@intCast(ii)] = moonpol[2];
+            rsv[@intCast(ii)] = ws.moonpol[2];
         }
         cMP = (1.5 * rsv[0] - 2 * rsv[1] + 0.5 * rsv[2]) / (rsv[0] + rsv[2] - 2 * rsv[1]);
         cMP *= dd;
         cMP = cMP - dd;
         mMP += cMP;
-        MP = mMP;
+        ws.MP = mMP;
         dd /= 10;
     }
     return 0;

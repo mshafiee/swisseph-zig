@@ -431,6 +431,8 @@ fn fgets(buf: [*]u8, size: i32, stream: ?*anyopaque) ?[*:0]u8 {
 
 /// Model of sweph.c's `struct swe_data` for the ported subset.
 pub const Swed = struct {
+    // Moshier moon workspace + pdp_* cache (was swemmoon file statics; TLS in C)
+    moon_ws: @import("swemmoon").MoonWs = .{},
     pldat: [SE_NPLANETS]PlanData = [_]PlanData{.{}} ** SE_NPLANETS,
     nddat: [SEI_NNDAT]PlanData = [_]PlanData{.{}} ** SEI_NNDAT,
     savedat: [SE_NPLANETS + 1]SavePositions = [_]SavePositions{.{}} ** (SE_NPLANETS + 1),
@@ -2789,7 +2791,7 @@ fn swecalc(tjd: f64, ipl: i32, iplmoon: i32, iflag_in: i32, x: *[24]f64, swed: *
                 // C: swi_moshmoon(tjd, DO_SAVE, NULL) writes into the shared
                 // swed.pldat[SEI_MOON].x; capture and copy.
                 var moonx6: [6]f64 = undefined;
-                const retc = swemmoon_mod.swi_moshmoon(tjd, false, &moonx6, &swed.oec, models, serr);
+                const retc = swemmoon_mod.swi_moshmoon(tjd, false, &moonx6, &swed.oec, models, serr, &swed.moon_ws);
                 if (retc == ERR)
                     return ERR;
                 for (0..6) |k| swed.pldat[SEI_MOON].x[k] = moonx6[k];
@@ -2856,7 +2858,7 @@ fn swecalc(tjd: f64, ipl: i32, iplmoon: i32, iflag_in: i32, x: *[24]f64, swed: *
                         }
                         // moshier_moon
                         var moonx6: [6]f64 = undefined;
-                        const retc2 = swemmoon_mod.swi_moshmoon(tjd, false, &moonx6, &swed.oec, models, serr);
+                        const retc2 = swemmoon_mod.swi_moshmoon(tjd, false, &moonx6, &swed.oec, models, serr, &swed.moon_ws);
                         if (retc2 == ERR)
                             return ERR;
                         for (0..6) |k| swed.pldat[SEI_MOON].x[k] = moonx6[k];
@@ -2980,11 +2982,11 @@ fn swecalc(tjd: f64, ipl: i32, iplmoon: i32, iflag_in: i32, x: *[24]f64, swed: *
         }
         const ndp = &swed.nddat[0]; // SEI_MEAN_NODE
         var xp2: [6]f64 = undefined;
-        var retc = swemmoon_mod.swi_mean_node(tjd, xp2[0..3], serr);
+        var retc = swemmoon_mod.swi_mean_node(tjd, xp2[0..3], serr, &swed.moon_ws);
         if (retc == ERR)
             return ERR;
         // speed (is almost constant; variation < 0.001 arcsec)
-        retc = swemmoon_mod.swi_mean_node(tjd - MEAN_NODE_SPEED_INTV, xp2[3..6], serr);
+        retc = swemmoon_mod.swi_mean_node(tjd - MEAN_NODE_SPEED_INTV, xp2[3..6], serr, &swed.moon_ws);
         if (retc == ERR)
             return ERR;
         xp2[3] = lib.swe_difrad2n(xp2[0], xp2[3]) / MEAN_NODE_SPEED_INTV;
@@ -3015,11 +3017,11 @@ fn swecalc(tjd: f64, ipl: i32, iplmoon: i32, iflag_in: i32, x: *[24]f64, swed: *
         const ndp = &swed.nddat[2]; // SEI_MEAN_APOG
         const swemmoon = @import("swemmoon");
         var xp2: [6]f64 = undefined;
-        var retc = swemmoon.swi_mean_apog(tjd, xp2[0..3], serr);
+        var retc = swemmoon.swi_mean_apog(tjd, xp2[0..3], serr, &swed.moon_ws);
         if (retc == ERR)
             return ERR;
         // speed (is not constant! variation ~= several arcsec)
-        retc = swemmoon_mod.swi_mean_apog(tjd - MEAN_NODE_SPEED_INTV, xp2[3..6], serr);
+        retc = swemmoon_mod.swi_mean_apog(tjd - MEAN_NODE_SPEED_INTV, xp2[3..6], serr, &swed.moon_ws);
         if (retc == ERR)
             return ERR;
         var ii: usize = 0;
@@ -3795,7 +3797,7 @@ fn lunar_osc_elem(tjd: f64, ipl_nd: usize, iflag_in: i32, swed: *Swed, models: A
                 } else {
                     t = tjd;
                 }
-                const retc2 = swemmoon_mod.swi_moshmoon(t, false, &xpos[i], &swed.oec, models, serr);
+                const retc2 = swemmoon_mod.swi_moshmoon(t, false, &xpos[i], &swed.oec, models, serr, &swed.moon_ws);
                 if (retc2 == ERR)
                     return retc2;
                 // precession and nutation etc.
@@ -5040,7 +5042,7 @@ fn sweplan(tjd: f64, ipli: usize, ifno: usize, iflag: i32, do_save: bool, xpret:
                 if (serr) |sr| {
                     appendSerrMax(sr, " \nusing Moshier eph. for moon; ");
                 }
-                retc = swemmoon_mod.swi_moshmoon(tjd, do_save, xpm, &swed.oec, models, serr);
+                retc = swemmoon_mod.swi_moshmoon(tjd, do_save, xpm, &swed.oec, models, serr, &swed.moon_ws);
                 if (retc != OK)
                     return retc;
             }
@@ -6094,7 +6096,7 @@ fn jplplan(tjd: f64, ipli: usize, iflag: i32, do_save: bool, xpret: ?[]f64, xper
 /// C swecalc's moshier_moon label: moshier moon + earth, saved
 fn swi_moshmoon_save(tjd: f64, swed: *Swed, models: AstroModels, serr: ?[]u8) i32 {
     var moonx6: [6]f64 = undefined;
-    const retc = swemmoon_mod.swi_moshmoon(tjd, false, &moonx6, &swed.oec, models, serr);
+    const retc = swemmoon_mod.swi_moshmoon(tjd, false, &moonx6, &swed.oec, models, serr, &swed.moon_ws);
     if (retc == ERR)
         return ERR;
     for (0..6) |k| swed.pldat[SEI_MOON].x[k] = moonx6[k];

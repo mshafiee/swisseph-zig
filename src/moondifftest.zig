@@ -16,6 +16,10 @@ const std = @import("std");
 const lib = @import("swephlib");
 const moon = @import("swemmoon");
 
+// C file statics are process-global; the corpus expects the moon workspace
+// (pdp cache, ss/cc tables) to persist across lines in one shared instance.
+var moon_ws = moon.MoonWs{};
+
 const AstroModels = lib.AstroModels;
 const Eps = lib.Eps;
 
@@ -132,7 +136,7 @@ fn checkM(line: []const u8) bool {
 
     var serr: [256]u8 = [_]u8{0} ** 256;
     var got: [6]f64 = [_]f64{0} ** 6;
-    const retc = moon.swi_moshmoon(tjd, false, &got, &oecFor(tjd), .{}, &serr);
+    const retc = moon.swi_moshmoon(tjd, false, &got, &oecFor(tjd), .{}, &serr, &moon_ws);
     if (retc != want_retc or !bitsEq(got[0], want[0]) or !bitsEq(got[1], want[1]) or
         !bitsEq(got[2], want[2]) or !bitsEq(got[3], want[3]) or !bitsEq(got[4], want[4]) or
         !bitsEq(got[5], want[5]))
@@ -171,13 +175,13 @@ fn checkPol3(line: []const u8, kind: u8) bool {
     var got: [3]f64 = [_]f64{0} ** 3;
     var retc: i32 = undefined;
     if (kind == 'F') {
-        retc = moon.swi_mean_node(J, &got, &serr);
+        retc = moon.swi_mean_node(J, &got, &serr, &moon_ws);
     } else if (kind == 'I') {
-        retc = moon.swi_mean_apog(J, &got, &serr);
+        retc = moon.swi_mean_apog(J, &got, &serr, &moon_ws);
     } else if (kind == 'G') {
-        retc = moon.swi_intp_apsides(J, &got, 5); // SEI_INTP_PERG
+        retc = moon.swi_intp_apsides(J, &got, 5, &moon_ws); // SEI_INTP_PERG
     } else {
-        retc = moon.swi_intp_apsides(J, &got, 4); // SEI_INTP_APOG
+        retc = moon.swi_intp_apsides(J, &got, 4, &moon_ws); // SEI_INTP_APOG
     }
     if (retc != want_retc or !bitsEq(got[0], want[0]) or !bitsEq(got[1], want[1]) or !bitsEq(got[2], want[2])) {
         std.debug.print("MISMATCH: {s}\n  retc want={} got={}\n  want={x},{x},{x}\n  got= {x},{x},{x}\n", .{
@@ -202,7 +206,7 @@ fn checkW(line: []const u8) bool {
     var want: [4]f64 = undefined;
     for (&want) |*w| w.* = parseFloat(tok.next()) orelse return parseFail(line);
     var got: [4]f64 = undefined;
-    moon.swi_mean_lunar_elements(J, &got[0], &got[1], &got[2], &got[3]);
+    moon.swi_mean_lunar_elements(J, &got[0], &got[1], &got[2], &got[3], &moon_ws);
     if (bitsEq(got[0], want[0]) and bitsEq(got[1], want[1]) and bitsEq(got[2], want[2]) and bitsEq(got[3], want[3]))
         return true;
     std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x} got={x},{x},{x},{x}\n", .{
