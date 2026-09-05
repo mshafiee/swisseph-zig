@@ -298,8 +298,7 @@ test "ABI swe_cleanup: idempotent, fixstar cache re-grows correctly" {
     var xx: [6]f64 = undefined;
 
     // allocate the fixstar cache, then free it twice
-    const ret0 = abi.swe_fixstar2(star.ptr, 2451545.0, 0, &xx, null);
-    std.debug.print("DBG2 ret0={d} star_now={s}\n", .{ ret0, std.mem.sliceTo(star.ptr, 0) });
+    _ = abi.swe_fixstar2(star.ptr, 2451545.0, 0, &xx, null);
     abi.swe_cleanup();
     abi.swe_cleanup(); // idempotent
 
@@ -308,12 +307,10 @@ test "ABI swe_cleanup: idempotent, fixstar cache re-grows correctly" {
     var serr: [256:0]u8 = [_:0]u8{0} ** 256;
     const star2 = std.fmt.bufPrintZ(&star_buf, "Sirius", .{}) catch unreachable; // fresh buffer: undo write-back
     const ret = abi.swe_fixstar2(star2.ptr, 2451545.0, 0, &first, &serr);
-    std.debug.print("DBG ret={d} serr={s}\n", .{ ret, std.mem.sliceTo(&serr, 0) });
     try std.testing.expect(ret >= 0);
     abi.swe_cleanup();
     const star3 = std.fmt.bufPrintZ(&star_buf, "Sirius", .{}) catch unreachable;
     const ret2 = abi.swe_fixstar2(star3.ptr, 2451545.0, 0, &xx, &serr);
-    std.debug.print("DBG ret2={d} serr={s}\n", .{ ret2, std.mem.sliceTo(&serr, 0) });
     try std.testing.expect(ret2 >= 0);
     for (0..6) |k| {
         try std.testing.expectEqual(
