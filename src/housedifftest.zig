@@ -194,8 +194,12 @@ fn checkT(line: []const u8) bool {
         return true;
     std.debug.print("MISMATCH: {s}\n  want={x},{x},{x} got={x},{x},{x}\n", .{
         line,
-        @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-        @as(u64, @bitCast(got[0])), @as(u64, @bitCast(got[1])), @as(u64, @bitCast(got[2])),
+        @as(u64, @bitCast(want[0])),
+        @as(u64, @bitCast(want[1])),
+        @as(u64, @bitCast(want[2])),
+        @as(u64, @bitCast(got[0])),
+        @as(u64, @bitCast(got[1])),
+        @as(u64, @bitCast(got[2])),
     });
     return false;
 }

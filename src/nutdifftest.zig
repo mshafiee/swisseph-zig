@@ -13,8 +13,8 @@ const std = @import("std");
 const lib = @import("swephlib");
 const deltat = @import("deltat");
 
-extern "c" fn swe_shim_sin(x: f64) f64;
-extern "c" fn swe_shim_cos(x: f64) f64;
+const swe_shim_sin = lib.swe_shim_sin;
+const swe_shim_cos = lib.swe_shim_cos;
 
 fn bitsEq(a: f64, b: f64) bool {
     return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
@@ -52,8 +52,10 @@ fn checkB(line: []const u8) bool {
     if (bitsEq(got[0], want[0]) and bitsEq(got[1], want[1])) return true;
     std.debug.print("MISMATCH: {s}\n  want={x},{x} got={x},{x}\n", .{
         line,
-        @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])),
-        @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),
+        @as(u64, @bitCast(want[0])),
+        @as(u64, @bitCast(want[1])),
+        @as(u64, @bitCast(got[0])),
+        @as(u64, @bitCast(got[1])),
     });
     return false;
 }
@@ -80,10 +82,18 @@ fn checkO(line: []const u8) bool {
         if (!bitsEq(g, w)) {
             std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x},{x},{x}\n  got= {x},{x},{x},{x},{x},{x}\n", .{
                 line,
-                @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-                @as(u64, @bitCast(want[3])), @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
-                @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),
-                @as(u64, @bitCast(got[3])),  @as(u64, @bitCast(got[4])),  @as(u64, @bitCast(got[5])),
+                @as(u64, @bitCast(want[0])),
+                @as(u64, @bitCast(want[1])),
+                @as(u64, @bitCast(want[2])),
+                @as(u64, @bitCast(want[3])),
+                @as(u64, @bitCast(want[4])),
+                @as(u64, @bitCast(want[5])),
+                @as(u64, @bitCast(got[0])),
+                @as(u64, @bitCast(got[1])),
+                @as(u64, @bitCast(got[2])),
+                @as(u64, @bitCast(got[3])),
+                @as(u64, @bitCast(got[4])),
+                @as(u64, @bitCast(got[5])),
             });
             return false;
         }
@@ -113,10 +123,18 @@ fn checkX(line: []const u8) bool {
         if (!bitsEq(g, w)) {
             std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x},{x},{x}\n  got= {x},{x},{x},{x},{x},{x}\n", .{
                 line,
-                @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-                @as(u64, @bitCast(want[3])), @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
-                @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),
-                @as(u64, @bitCast(got[3])),  @as(u64, @bitCast(got[4])),  @as(u64, @bitCast(got[5])),
+                @as(u64, @bitCast(want[0])),
+                @as(u64, @bitCast(want[1])),
+                @as(u64, @bitCast(want[2])),
+                @as(u64, @bitCast(want[3])),
+                @as(u64, @bitCast(want[4])),
+                @as(u64, @bitCast(want[5])),
+                @as(u64, @bitCast(got[0])),
+                @as(u64, @bitCast(got[1])),
+                @as(u64, @bitCast(got[2])),
+                @as(u64, @bitCast(got[3])),
+                @as(u64, @bitCast(got[4])),
+                @as(u64, @bitCast(got[5])),
             });
             return false;
         }

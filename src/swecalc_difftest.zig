@@ -240,9 +240,8 @@ fn checkY(line: []const u8) bool {
         !std.mem.eql(u8, std.mem.sliceTo(&serr, 0), want_serr))
     {
         std.debug.print("MISMATCH: {s}\n  retflag want={} got={}; mag want={x} got={x}; star want='{s}' got='{s}'; serr want='{s}' got='{s}'\n", .{
-            line, want_ret, retflag, @as(u64, @bitCast(want_mag)), @as(u64, @bitCast(got_mag)),
-            want_star, std.mem.sliceTo(&star_buf, 0),
-            want_serr, std.mem.sliceTo(&serr, 0),
+            line,      want_ret,                      retflag,   @as(u64, @bitCast(want_mag)), @as(u64, @bitCast(got_mag)),
+            want_star, std.mem.sliceTo(&star_buf, 0), want_serr, std.mem.sliceTo(&serr, 0),
         });
         return false;
     }
@@ -382,10 +381,18 @@ fn checkU(line: []const u8) bool {
         if (!bitsEq(g, w)) {
             std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x},{x},{x}\n  got= {x},{x},{x},{x},{x},{x}\n", .{
                 line,
-                @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-                @as(u64, @bitCast(want[3])), @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
-                @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),
-                @as(u64, @bitCast(got[3])),  @as(u64, @bitCast(got[4])),  @as(u64, @bitCast(got[5])),
+                @as(u64, @bitCast(want[0])),
+                @as(u64, @bitCast(want[1])),
+                @as(u64, @bitCast(want[2])),
+                @as(u64, @bitCast(want[3])),
+                @as(u64, @bitCast(want[4])),
+                @as(u64, @bitCast(want[5])),
+                @as(u64, @bitCast(got[0])),
+                @as(u64, @bitCast(got[1])),
+                @as(u64, @bitCast(got[2])),
+                @as(u64, @bitCast(got[3])),
+                @as(u64, @bitCast(got[4])),
+                @as(u64, @bitCast(got[5])),
             });
             return false;
         }

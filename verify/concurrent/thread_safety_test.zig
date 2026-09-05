@@ -1,17 +1,10 @@
 //! Thread-safety test for the swisseph-zig core API.
 //!
-//! CURRENT STATUS: Phase A complete (threadlocal vars), Phase B pending.
-//!
-//! threadlocal vars give per-thread isolation for the Moshier polynomial
-//! tables (ss, cc, moonpol, etc.), matching C's __thread on Linux. However,
-//! the Moshier moon/planet algorithms use CALL-ORDER-DEPENDENT accumulated
-//! state: the ss/cc tables are lazily built and indexed by date range. A
-//! fresh thread computes different intermediate values than a thread that
-//! has processed prior dates, even with threadlocal storage.
-//!
-//! FULL FIX (Phase B): move the accumulated state into a MoonCtx/JplCtx
-//! struct passed per-caller, so each thread can maintain its own complete
-//! computation context. Then this test passes with 0 races.
+//! Phase B complete: ALL mutable library state lives in per-instance context
+//! structs (Swed.moon_ws/plan_ws/jpl/fixstar fields, SweclCtx, SwehelCtx,
+//! HouseCtx). Each thread owns a bundle; results are deterministic regardless
+//! of call order or which threads ran before. The C-ABI layer (swe_abi.zig)
+//! keeps one threadlocal SweState per OS thread.
 //!
 //! Run: zig build test
 const std = @import("std");
@@ -58,10 +51,7 @@ test "concurrent degnorm is always safe (pure function)" {
     }
 }
 
-test "swe_calc Moshier: document thread-safety limitation" {
-    // This test documents the known limitation. It runs serial swe_calc
-    // and verifies correctness — the concurrent race is documented, not
-    // yet fixed (Phase B: MoonCtx/JplCtx context structs needed).
+test "swe_calc Moshier: correct in isolation" {
     var xx: [6]f64 = undefined;
     var serr: [256]u8 = [_]u8{0} ** 256;
     var swed = sweph.Swed{};
@@ -69,4 +59,81 @@ test "swe_calc Moshier: document thread-safety limitation" {
     const ret = sweph.swe_calc(2451545.0, 0, 0, &xx, &swed, .{}, &dctx, &serr);
     try std.testing.expect(ret >= 0);
     try std.testing.expect(xx[0] > 279.0 and xx[0] < 281.0);
+}
+
+// ── Phase B: per-thread context bundles ──────────────────────────────────
+
+const WorkerCtx = struct {
+    swed: sweph.Swed = .{},
+    dctx: deltat.DeltatCtx = .{},
+    results: [N_DATES][6]f64 = undefined,
+    failed: bool = false,
+};
+const N_DATES = 64;
+const N_WORKERS = 4;
+// deliberately NON-monotonic dates: exercises pdp_teval cache misses/hits,
+// jpl nrl record reuse, fixstar memo invalidation across workers
+var dates: [N_DATES]f64 = undefined;
+
+fn fillDates() void {
+    var i: usize = 0;
+    while (i < N_DATES) : (i += 1) {
+        dates[i] = 2451545.0 + @as(f64, @floatFromInt((i * 7919) % 40000)) - 20000.0;
+    }
+}
+
+fn worker(w: *WorkerCtx) void {
+    var serr: [256]u8 = undefined;
+    for (0..N_DATES) |i| {
+        const ret = sweph.swe_calc(dates[i], 1, 4, &w.results[i], &w.swed, .{}, &w.dctx, &serr); // SEFLG_MOSEPH
+        if (ret < 0) w.failed = true;
+    }
+}
+
+test "Phase B: 4 threads x 64 interleaved dates == single-threaded reference" {
+    fillDates();
+    // single-threaded reference
+    var ref = WorkerCtx{};
+    worker(&ref);
+    try std.testing.expect(!ref.failed);
+    // 4 concurrent workers with independent bundles
+    var workers: [N_WORKERS]WorkerCtx = undefined;
+    for (0..N_WORKERS) |t| workers[t] = WorkerCtx{};
+    var threads: [N_WORKERS]std.Thread = undefined;
+    for (0..N_WORKERS) |t| {
+        threads[t] = std.Thread.spawn(.{}, worker, .{&workers[t]}) catch unreachable;
+    }
+    for (0..N_WORKERS) |t| threads[t].join();
+    for (0..N_WORKERS) |t| {
+        try std.testing.expect(!workers[t].failed);
+        for (0..N_DATES) |i| {
+            for (0..6) |k| {
+                const a: u64 = @bitCast(workers[t].results[i][k]);
+                const b: u64 = @bitCast(ref.results[i][k]);
+                if (a != b) {
+                    std.debug.print("worker {d} date {d} coord {d}: {x} != {x}\n", .{ t, i, k, a, b });
+                    return error.Nondeterministic;
+                }
+            }
+        }
+    }
+}
+
+test "Phase B: fresh thread computing a late date == reference (no call-order dependence)" {
+    fillDates();
+    // pre-warm nothing: a brand-new bundle computing ONLY a late date
+    var w = WorkerCtx{};
+    var serr: [256]u8 = undefined;
+    var xx: [6]f64 = undefined;
+    const late = dates[N_DATES - 1];
+    const ret = sweph.swe_calc(late, 1, 4, &xx, &w.swed, .{}, &w.dctx, &serr);
+    try std.testing.expect(ret >= 0);
+    var ref = WorkerCtx{};
+    worker(&ref);
+    for (0..6) |k| {
+        try std.testing.expectEqual(
+            @as(u64, @bitCast(ref.results[N_DATES - 1][k])),
+            @as(u64, @bitCast(xx[k])),
+        );
+    }
 }

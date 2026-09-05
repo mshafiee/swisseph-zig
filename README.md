@@ -165,6 +165,25 @@ against a C oracle compiled with `-ffp-contract=off`. The verification
 harness lives in a companion repo. See [docs/parity.md](docs/parity.md)
 for the FMA trap, the `libm` strategy, and the correctly-rounded fallback.
 
+## Threading contract
+
+All mutable library state lives in explicit per-instance context structs:
+`Swed` (including its `moon_ws`, `plan_ws`, `jpl` and fixstar-cache members),
+`DeltatCtx`, `SweclCtx`, `SwehelCtx`, `swehouse.HouseCtx`. **One context
+bundle per thread; do not share contexts across threads without external
+locking.**
+
+The C-ABI layer (`src/swe_abi.zig`) holds one `SweState` (the full bundle)
+in a `threadlocal` — each OS thread gets its own isolated C-API instance,
+mirroring upstream C's thread-local statics. Consequence: state set via the
+ABI (`swe_set_sid_mode`, `swe_set_ephe_path`, fixstar cache, …) is
+**per-thread**; do setup on every thread that calls the library.
+`SweState.deinit()` frees the fixstar backing buffer at thread teardown.
+
+Verified by `zig build test`: 4 threads × 64 interleaved, non-monotonic
+dates with independent bundles produce bit-identical results to a
+single-threaded reference, plus ABI sid-mode non-leak across threads.
+
 ## License
 
 Dual-licensed, same model as upstream Swiss Ephemeris:

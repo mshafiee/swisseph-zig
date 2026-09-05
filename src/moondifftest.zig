@@ -23,9 +23,9 @@ var moon_ws = moon.MoonWs{};
 const AstroModels = lib.AstroModels;
 const Eps = lib.Eps;
 
-// C's calc_epsilon uses libm sin/cos; the shim is the same libm.
-extern "c" fn swe_shim_sin(x: f64) f64;
-extern "c" fn swe_shim_cos(x: f64) f64;
+// C's calc_epsilon uses libm sin/cos; use pure Zig now
+const swe_shim_sin = lib.swe_shim_sin;
+const swe_shim_cos = lib.swe_shim_cos;
 
 fn bitsEq(a: f64, b: f64) bool {
     return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));
@@ -105,8 +105,12 @@ fn checkV(line: []const u8) bool {
         return true;
     std.debug.print("MISMATCH: {s}\n  want={x},{x},{x} got={x},{x},{x}\n", .{
         line,
-        @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-        @as(u64, @bitCast(x[0])),    @as(u64, @bitCast(x[1])),    @as(u64, @bitCast(x[2])),
+        @as(u64, @bitCast(want[0])),
+        @as(u64, @bitCast(want[1])),
+        @as(u64, @bitCast(want[2])),
+        @as(u64, @bitCast(x[0])),
+        @as(u64, @bitCast(x[1])),
+        @as(u64, @bitCast(x[2])),
     });
     return false;
 }
@@ -142,7 +146,7 @@ fn checkM(line: []const u8) bool {
         !bitsEq(got[5], want[5]))
     {
         std.debug.print("MISMATCH: {s}\n  retc want={} got={}\n  want={x},{x},{x},{x},{x},{x}\n  got= {x},{x},{x},{x},{x},{x}\n", .{
-            line, want_retc, retc,
+            line,                        want_retc,                   retc,
             @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
             @as(u64, @bitCast(want[3])), @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
             @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),
@@ -185,7 +189,7 @@ fn checkPol3(line: []const u8, kind: u8) bool {
     }
     if (retc != want_retc or !bitsEq(got[0], want[0]) or !bitsEq(got[1], want[1]) or !bitsEq(got[2], want[2])) {
         std.debug.print("MISMATCH: {s}\n  retc want={} got={}\n  want={x},{x},{x}\n  got= {x},{x},{x}\n", .{
-            line, want_retc, retc,
+            line,                        want_retc,                   retc,
             @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
             @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),
         });
@@ -211,8 +215,14 @@ fn checkW(line: []const u8) bool {
         return true;
     std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x} got={x},{x},{x},{x}\n", .{
         line,
-        @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])), @as(u64, @bitCast(want[3])),
-        @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),  @as(u64, @bitCast(got[3])),
+        @as(u64, @bitCast(want[0])),
+        @as(u64, @bitCast(want[1])),
+        @as(u64, @bitCast(want[2])),
+        @as(u64, @bitCast(want[3])),
+        @as(u64, @bitCast(got[0])),
+        @as(u64, @bitCast(got[1])),
+        @as(u64, @bitCast(got[2])),
+        @as(u64, @bitCast(got[3])),
     });
     return false;
 }

@@ -11,8 +11,8 @@ const lib = @import("swephlib");
 const plan = @import("swemplan");
 const sweph = @import("sweph");
 
-extern "c" fn swe_shim_sin(x: f64) f64;
-extern "c" fn swe_shim_cos(x: f64) f64;
+const swe_shim_sin = lib.swe_shim_sin;
+const swe_shim_cos = lib.swe_shim_cos;
 
 fn bitsEq(a: f64, b: f64) bool {
     return @as(u64, @bitCast(a)) == @as(u64, @bitCast(b));

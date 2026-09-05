@@ -82,10 +82,18 @@ fn checkU(line: []const u8) bool {
         if (!bitsEq(g, w)) {
             std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x},{x},{x}\n  got= {x},{x},{x},{x},{x},{x}\n", .{
                 line,
-                @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-                @as(u64, @bitCast(want[3])), @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
-                @as(u64, @bitCast(got[0])),  @as(u64, @bitCast(got[1])),  @as(u64, @bitCast(got[2])),
-                @as(u64, @bitCast(got[3])),  @as(u64, @bitCast(got[4])),  @as(u64, @bitCast(got[5])),
+                @as(u64, @bitCast(want[0])),
+                @as(u64, @bitCast(want[1])),
+                @as(u64, @bitCast(want[2])),
+                @as(u64, @bitCast(want[3])),
+                @as(u64, @bitCast(want[4])),
+                @as(u64, @bitCast(want[5])),
+                @as(u64, @bitCast(got[0])),
+                @as(u64, @bitCast(got[1])),
+                @as(u64, @bitCast(got[2])),
+                @as(u64, @bitCast(got[3])),
+                @as(u64, @bitCast(got[4])),
+                @as(u64, @bitCast(got[5])),
             });
             return false;
         }
@@ -171,15 +179,23 @@ fn checkD(line: []const u8) bool {
         {
             std.debug.print("MISMATCH elems: {s}\n  want={x},{x},{x},{x},{x},{x},{x},{x} ifl={}\n  got= {x},{x},{x},{x},{x},{x},{x},{x} ifl={}\n", .{
                 line,
-                @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])),
-                @as(u64, @bitCast(want[2])), @as(u64, @bitCast(want[3])),
-                @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
-                @as(u64, @bitCast(want[6])), @as(u64, @bitCast(want[7])),
+                @as(u64, @bitCast(want[0])),
+                @as(u64, @bitCast(want[1])),
+                @as(u64, @bitCast(want[2])),
+                @as(u64, @bitCast(want[3])),
+                @as(u64, @bitCast(want[4])),
+                @as(u64, @bitCast(want[5])),
+                @as(u64, @bitCast(want[6])),
+                @as(u64, @bitCast(want[7])),
                 want_ifl,
-                @as(u64, @bitCast(got.?.tjd0)),  @as(u64, @bitCast(got.?.tequ)),
-                @as(u64, @bitCast(got.?.mano)),  @as(u64, @bitCast(got.?.sema)),
-                @as(u64, @bitCast(got.?.ecce)),  @as(u64, @bitCast(got.?.parg)),
-                @as(u64, @bitCast(got.?.node)),  @as(u64, @bitCast(got.?.incl)),
+                @as(u64, @bitCast(got.?.tjd0)),
+                @as(u64, @bitCast(got.?.tequ)),
+                @as(u64, @bitCast(got.?.mano)),
+                @as(u64, @bitCast(got.?.sema)),
+                @as(u64, @bitCast(got.?.ecce)),
+                @as(u64, @bitCast(got.?.parg)),
+                @as(u64, @bitCast(got.?.node)),
+                @as(u64, @bitCast(got.?.incl)),
                 got.?.fict_ifl,
             });
             return false;
@@ -221,10 +237,18 @@ fn checkS(line: []const u8) bool {
         if (!bitsEq(g, w)) {
             std.debug.print("MISMATCH: {s}\n  want={x},{x},{x},{x},{x},{x}\n  got= {x},{x},{x},{x},{x},{x}\n", .{
                 line,
-                @as(u64, @bitCast(want[0])), @as(u64, @bitCast(want[1])), @as(u64, @bitCast(want[2])),
-                @as(u64, @bitCast(want[3])), @as(u64, @bitCast(want[4])), @as(u64, @bitCast(want[5])),
-                @as(u64, @bitCast(xp[0])),  @as(u64, @bitCast(xp[1])),  @as(u64, @bitCast(xp[2])),
-                @as(u64, @bitCast(xp[3])),  @as(u64, @bitCast(xp[4])),  @as(u64, @bitCast(xp[5])),
+                @as(u64, @bitCast(want[0])),
+                @as(u64, @bitCast(want[1])),
+                @as(u64, @bitCast(want[2])),
+                @as(u64, @bitCast(want[3])),
+                @as(u64, @bitCast(want[4])),
+                @as(u64, @bitCast(want[5])),
+                @as(u64, @bitCast(xp[0])),
+                @as(u64, @bitCast(xp[1])),
+                @as(u64, @bitCast(xp[2])),
+                @as(u64, @bitCast(xp[3])),
+                @as(u64, @bitCast(xp[4])),
+                @as(u64, @bitCast(xp[5])),
             });
             return false;
         }
