@@ -1,29 +1,35 @@
 name: CI
+
 on:
-  push: { branches: [main] }
+  push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.16.0"
+
 jobs:
   ci:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install Zig 0.16.0 (direct from ziglang.org)
-        run: |
-          case "${{ runner.os }}-${{ runner.arch }}" in
-            Linux-X64)   triple=x86_64-linux ;;
-            Linux-ARM64) triple=aarch64-linux ;;
-            macOS-ARM64) triple=aarch64-macos ;;
-            macOS-X64)   triple=x86_64-macos ;;
-            *) echo "unsupported runner: ${{ runner.os }}-${{ runner.arch }}"; exit 1 ;;
-          esac
-          curl -fsSL --retry 3 -o /tmp/zig.tar.xz \
-            "https://ziglang.org/download/0.16.0/zig-${triple}-0.16.0.tar.xz"
-          mkdir -p "$HOME/.zig-sdk"
-          tar -xJf /tmp/zig.tar.xz -C "$HOME/.zig-sdk"
-          echo "$HOME/.zig-sdk/zig-${triple}-0.16.0" >> "$GITHUB_PATH"
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Cache .zig-cache
+        uses: actions/cache@v4
+        with:
+          path: .zig-cache
+          key: zig-ci-${{ env.ZIG_VERSION }}-${{ runner.os }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: zig-ci-${{ env.ZIG_VERSION }}-${{ runner.os }}-
       - name: Zig version
         run: zig version
       - name: Format check
@@ -33,11 +39,19 @@ jobs:
       - name: Build (native)
         run: zig build -Doptimize=ReleaseFast
       - name: Smoke test
-        run: ./zig-out/bin/swetest -b1.1.2000 -p0 -fPLBRS -g, -head
+        shell: bash
+        run: |
+          if [ -x ./zig-out/bin/swetest.exe ]; then exe=swetest.exe; else exe=swetest; fi
+          ./zig-out/bin/$exe -b1.1.2000 -p0 -fPLBRS -g, -head
       - name: Examples
         run: zig build examples
       - name: Cross-build smoke
+        if: runner.os == 'Linux'
         run: |
           zig build libswe -Dtarget=aarch64-linux -Doptimize=ReleaseFast
           zig build libswe -Dtarget=x86_64-windows -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=x86_64-macos -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=aarch64-macos -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=x86_64-freebsd -Doptimize=ReleaseFast
+          zig build libswe -Dtarget=aarch64-freebsd -Doptimize=ReleaseFast
           zig build libswe -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast

@@ -18,7 +18,8 @@ extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn close(fd: c_int) c_int;
 
 pub fn main(init: std.process.Init) !void {
-    var it = std.process.Args.Iterator.init(init.minimal.args);
+    var it = try std.process.Args.Iterator.initAllocator(init.minimal.args, std.heap.page_allocator);
+    defer it.deinit();
     _ = it.next(); // skip argv[0]
     const arg1 = it.next();
     var fd: c_int = 0; // stdin by default

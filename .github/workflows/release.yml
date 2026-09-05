@@ -1,41 +1,135 @@
 name: Release
+
 on:
-  push: { tags: ["v*"] }
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip the test gate (build-only dry run)"
+        type: boolean
+        default: false
+
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ZIG_VERSION: "0.16.0"
+
 jobs:
-  dist:
+  test:
+    name: Test gate (${{ matrix.os }})
+    if: ${{ !inputs.skip_tests }}
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-latest, triple: x86_64-linux }
-          - { os: ubuntu-latest, triple: aarch64-linux }
-          - { os: macos-latest, triple: aarch64-macos }
-          - { os: macos-latest, triple: x86_64-macos }
-          - { os: ubuntu-latest, triple: x86_64-windows }
-          - { os: ubuntu-latest, triple: wasm32-freestanding }
-          - { os: ubuntu-latest, triple: wasm32-wasi }
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v1
-        with: { version: "0.16.0" }
-      - name: Build ${{ matrix.triple }}
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Cache .zig-cache
+        uses: actions/cache@v4
+        with:
+          path: .zig-cache
+          key: zig-test-${{ env.ZIG_VERSION }}-${{ runner.os }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: zig-test-${{ env.ZIG_VERSION }}-${{ runner.os }}-
+      - name: Unit tests (incl. race stress)
+        run: zig build test
+      - name: Smoke test
+        shell: bash
         run: |
-          mkdir -p dist/${{ matrix.triple }}/lib dist/${{ matrix.triple }}/bin dist/${{ matrix.triple }}/include
-          zig build --prefix zig-out/${{ matrix.triple }} -Dtarget=${{ matrix.triple }} -Doptimize=ReleaseFast
-          cp zig-out/${{ matrix.triple }}/lib/libswe.* dist/${{ matrix.triple }}/lib/ 2>/dev/null || true
-          [ -e zig-out/${{ matrix.triple }}/lib/swe.lib ] && cp zig-out/${{ matrix.triple }}/lib/swe.lib dist/${{ matrix.triple }}/lib/libswe.lib
-          [ -e zig-out/${{ matrix.triple }}/bin/swe.dll ] && cp zig-out/${{ matrix.triple }}/bin/swe.dll dist/${{ matrix.triple }}/lib/libswe.dll
-          cp include/*.h dist/${{ matrix.triple }}/include/
-          for b in swetest swevents swemini obama swephgen4; do
-            case "${{ matrix.triple }}" in
-              wasm32-freestanding) ;;
-              *windows*) [ -e zig-out/${{ matrix.triple }}/bin/$b.exe ] && cp zig-out/${{ matrix.triple }}/bin/$b.exe dist/${{ matrix.triple }}/bin/ ;;
-              *) [ -e zig-out/${{ matrix.triple }}/bin/$b ] && cp zig-out/${{ matrix.triple }}/bin/$b dist/${{ matrix.triple }}/bin/ ;;
-            esac
-          done
-      - name: Archive
-        run: cd dist && tar czf ../swisseph-zig-${{ matrix.triple }}.tar.gz ${{ matrix.triple }}
-      - uses: softprops/action-gh-release@v1
-        with: { files: "swisseph-zig-*.tar.gz" }
+          if [ -x ./zig-out/bin/swetest.exe ]; then exe=swetest.exe; else exe=swetest; fi
+          ./zig-out/bin/$exe -b1.1.2000 -p0 -fPLBRS -g, -head
+
+  build:
+    name: Build ${{ matrix.triple }}
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        triple:
+          - x86_64-linux
+          - aarch64-linux
+          - x86_64-freebsd
+          - aarch64-freebsd
+          - x86_64-macos
+          - aarch64-macos
+          - x86_64-windows
+          - wasm32-freestanding
+          - wasm32-wasi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Cache .zig-cache
+        uses: actions/cache@v4
+        with:
+          path: .zig-cache
+          key: zig-build-${{ env.ZIG_VERSION }}-${{ matrix.triple }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: zig-build-${{ env.ZIG_VERSION }}-${{ matrix.triple }}-
+      - name: Build dist/<triple> (Makefile is the single source of truth)
+        run: make dist/${{ matrix.triple }} ZIG_OPTIMIZE=ReleaseFast
+      - name: Verify produced libraries
+        run: |
+          shopt -s nullglob
+          libs=(dist/${{ matrix.triple }}/lib/*)
+          [ ${#libs[@]} -gt 0 ] || { echo "no libraries produced"; exit 1; }
+          file "${libs[@]}"
+      - name: Smoke test (native linux only)
+        if: matrix.triple == 'x86_64-linux'
+        run: dist/${{ matrix.triple }}/bin/swetest -b1.1.2000 -p0 -fPLBRS -g, -head
+      - name: Package
+        id: package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PKG="swisseph-zig-${VERSION}-${{ matrix.triple }}"
+          mv dist/${{ matrix.triple }} "${PKG}"
+          if [ "${{ matrix.triple }}" = "x86_64-windows" ]; then
+            zip -r "${PKG}.zip" "${PKG}"
+            echo "archive=${PKG}.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar czf "${PKG}.tar.gz" "${PKG}"
+            echo "archive=${PKG}.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.triple }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*.tar.gz
+            release/*.zip
+            release/SHA256SUMS
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

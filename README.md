@@ -68,6 +68,32 @@ The exported `swe_*` symbols cover all 107 upstream `swephexp.h` API
 functions (119 exported incl. internal shims) — existing C code
 compiled against the upstream library links without source changes.
 
+### Prebuilt downloads
+
+CI builds all 9 targets on every `v*` tag and attaches archives to the
+[GitHub release](https://github.com/mshafiee/swisseph-zig/releases):
+
+| Target | Archive |
+|---|---|
+| `x86_64-linux`, `aarch64-linux` | `swisseph-zig-<ver>-<triple>.tar.gz` |
+| `x86_64-macos`, `aarch64-macos` | `swisseph-zig-<ver>-<triple>.tar.gz` |
+| `x86_64-freebsd`, `aarch64-freebsd` | `swisseph-zig-<ver>-<triple>.tar.gz` |
+| `x86_64-windows` | `swisseph-zig-<ver>-x86_64-windows.zip` |
+| `wasm32-freestanding`, `wasm32-wasi` | `swisseph-zig-<ver>-<triple>.tar.gz` |
+
+Each archive unpacks to `swisseph-zig-<triple>/` with `lib/`, `bin/`
+(`swetest` and friends) and `include/` (the `swephexp.h` header set).
+Integrity: download `SHA256SUMS` from the release and run
+`sha256sum -c SHA256SUMS`.
+
+```sh
+# Example: macOS (Apple Silicon)
+triple=aarch64-macos ver=2.10.3
+curl -LO "https://github.com/mshafiee/swisseph-zig/releases/download/v${ver}/swisseph-zig-${ver}-${triple}.tar.gz"
+tar xzf "swisseph-zig-${ver}-${triple}.tar.gz"
+cc myprog.c -I"swisseph-zig-${triple}/include" -L"swisseph-zig-${triple}/lib" -lswe -lm -o myprog
+```
+
 ### CLI tools
 
 ```sh
