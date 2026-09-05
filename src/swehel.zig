@@ -2681,8 +2681,6 @@ fn get_heliacal_details(tday: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f64, 
 /// swehel.c heliacal_ut_vis_lim() — visibility-limit method driver
 fn heliacal_ut_vis_lim(tjd_start: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f64, ObjectName: []const u8, TypeEventIn: i32, helflag: i32, dret: *[10]f64, serr_ret: ?[]u8, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, cctx: *SweclCtx, hctx: *SwehelCtx) i32 {
     var tday: f64 = undefined;
-    var direct: f64 = 1;
-    _ = &direct;
     var retval: i32 = OK;
     const helflag2 = helflag;
     const TypeEvent = TypeEventIn;

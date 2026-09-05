@@ -1059,10 +1059,8 @@ fn parseArgsWithC(argc: c_int, argv: [*][*:0]u8) !void {
             if (sp.len > 0 and sp[0] == '[') sp = sp[1..];
             var l: f64 = 0;
             var la: f64 = 0;
-            var hs: u8 = 'P';
             _ = &l;
             _ = &la;
-            _ = &hs;
             // parse using sscanf via C for simplicity
             var ctmp: [256]u8 = [_]u8{0} ** 256;
             @memcpy(ctmp[0..sp.len], sp);
