@@ -90,14 +90,8 @@ fn checkH(line: []const u8) bool {
     var have_b: [10]f64 = [_]f64{0} ** 10;
     have_a[9] = 12.3;
     var it = std.mem.tokenizeScalar(u8, expect_part, ' ');
-    _ = it.next(); // "H"
-    _ = it.next(); // hsys
-    _ = it.next(); // armc
-    _ = it.next(); // geolat
-    _ = it.next(); // eps
-    _ = it.next(); // iflag
-    _ = it.next(); // ->
-    _ = it.next(); // retc
+    // Skip header tokens: "H" hsys armc geolat eps iflag -> retc
+    for (0..8) |_| _ = it.next();
     while (it.next()) |t| {
         const p = parsePair(t) orelse return parseFail(line);
         switch (p.key) {

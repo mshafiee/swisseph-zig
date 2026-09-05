@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- swephlib module (shared helpers).
-// Translated 1:1 from swephlib.c to preserve exact floating-point
-// operation order, differential-tested against the C oracle.
-// Scope so far: the helpers needed by swemmoon (obliquity, precession
-// family, coordinate conversions) plus general angle helpers.
+// Swiss Ephemeris Zig port — swephlib module (shared helpers).
+// Port of swephlib.c; see docs/parity.md for the bit-parity contract.
 const std = @import("std");
 
 // Platform libm via shim (see libmshim.c) or pure Zig std.math when -Dpure
@@ -1002,7 +999,6 @@ pub fn swi_precess(R: *[3]f64, J: f64, iflag: i32, direction: i32, models: Astro
     }
 }
 
-// ---------------------------------------------------------------------------
 // Nutation (swephlib.c 1487-2158)
 const nt = [1008]i16{
     0,   0,   0,   0,   2,   2062, 2,      -895, 5,    -2,  0,  2,   0,    1,   46,   0,    -24, 0,  2,     0,  -2,   0,   0,   11,   0,    0,   0,   -2,  0,   2,   0,
@@ -1918,8 +1914,6 @@ const dcor_ra_jpl = [51]f64{
     -51.796, -51.961, -52.055, -52.134, -52.165, -52.141, -52.255,
 };
 
-// ---------------------------------------------------------------------------
-
 // IAU 1980 nutation series (swephlib.c nt[]); 112 rows x 9 shorts.
 // Row layout: MM, MS, FF, DD, OM, LS, LS2, OC, OC2 (units 0.0001"/0.00001");
 // rows with first value >= 100 are Herring (1987) correction rows.
@@ -2576,9 +2570,7 @@ pub fn swi_icrs2fk5(x: *[6]f64, iflag: i32, backward: bool) void {
         x[i] = xx[i];
 }
 
-// ---------------------------------------------------------------------------
 // Sidereal time (swephlib.c 3285-3594)
-// ---------------------------------------------------------------------------
 
 const DeltatCtx = @import("deltat").DeltatCtx;
 const swe_deltat_ex = @import("deltat").swe_deltat_ex;
@@ -2847,9 +2839,7 @@ pub fn swe_difrad2n(p1: f64, p2: f64) f64 {
     return dif;
 }
 
-// ---------------------------------------------------------------------------
 // string / CRC helpers used by the sweph file machinery (swephlib.c)
-// ---------------------------------------------------------------------------
 
 /// swephlib.c swi_cutstr: split s at cutlist characters, in place.
 /// C semantics: cpos[0] = s; each cut char is NUL'd; consecutive cut chars

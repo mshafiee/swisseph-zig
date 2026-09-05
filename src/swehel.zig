@@ -1,16 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- swehel module (heliacal events).
-// Translated 1:1 from swehel.c to preserve exact floating-point operation
-// order, differential-tested against the C oracle.
-//
-// Scope: the full swehel.c public API (swe_vis_limit_mag,
-// swe_topo_arcus_visionis, swe_heliacal_angle, swe_heliacal_pheno_ut,
-// swe_heliacal_ut) with all internals.
-// C globals -> explicit context (SwehelCtx): the function-local TLS statics
-// (SunRA's tjdlast/ralast, kOZ/ka/Deltam memo caches, call_swe_fixstar_mag's
-// dmag/star_save) are order-dependent: the oracle replays the same call
-// sequence, and so must the Zig checker.
+// Swiss Ephemeris Zig port — swehel module (heliacal events).
+// Port of swehel.c; see docs/parity.md for the bit-parity contract.
+// C function-local statics live in SwehelCtx (order-dependent, like C).
 const std = @import("std");
 const lib = @import("swephlib");
 const deltat = @import("deltat");
@@ -134,7 +126,7 @@ const SEI_ECL_GEOALT_MAX: f64 = 25000.0;
 
 pub const SE_GREG_CAL: i32 = 1;
 
-/// swehel.c function-local TLS statics, order-dependent caches. Threaded
+/// swehel.c function-local caches, order-dependent. Threaded
 /// through the swehel API (single-threaded contract).
 pub const SwehelCtx = struct {
     // SunRA
@@ -204,25 +196,24 @@ fn OpticFactor(Bback: f64, kX: f64, dobs: *const [6]f64, JDNDaysUT: f64, ObjectN
     const SNi: f64 = if (SN <= 0.00000001) 0.00000001 else SN;
     _ = &Age;
     _ = &SN;
-    _ = JDNDaysUT; // currently not used
+    _ = JDNDaysUT; // unused
     const Binocular = dobs[2];
     const OpticMag = dobs[3];
     var OpticDia = dobs[4];
     var OpticTrans = dobs[5];
     var is_scotopic = false;
-    // 23 jaar as standard from Garstang
+    // 23 years as standard from Garstang
     const Pst = PupilDia(23, Bback);
-    if (OpticMag == 1) { // OpticMagn=1 means using eye
+    if (OpticMag == 1) { // 1 means using eye
         OpticTrans = 1;
         OpticDia = Pst;
     }
-    // (C's #if 0 block: done in default_heliacal_parameters())
     // Schaefer, Astronomy and the limits of vision, Archaeoastronomy, 1993
-    const CIb: f64 = 0.7; // color of background (from Ben Sugerman)
-    const CIi: f64 = 0.5; // Color index for white (from Ben Sugerman)
+    const CIb: f64 = 0.7; // background color index
+    const CIi: f64 = 0.5; // white color index
     const ObjectSize: f64 = 0;
     if (std.mem.eql(u8, ObjectName, "moon")) {
-        // ObjectSize and CI needs to be determined (depending on JDNDaysUT)
+        // TODO: determine ObjectSize and CI from JDNDaysUT
     }
     var Fb: f64 = 1;
     if (Binocular == 0) Fb = 1.41;
@@ -317,7 +308,7 @@ fn call_swe_fixstar(star: []const u8, tjd: f64, iflag: i32, xx: *[6]f64, serr: ?
     return sweph.swe_fixstar(star2[0..n], tjd, iflag, xx, swed, models, dctx, serr);
 }
 
-/// swehel.c call_swe_fixstar_mag() — memoizes by star name (TLS statics)
+/// swehel.c call_swe_fixstar_mag() — memoized in ctx by star name
 fn call_swe_fixstar_mag(star: []const u8, mag: *f64, serr: ?[]u8, swed: *Swed, hctx: *SwehelCtx) i32 {
     const saved = std.mem.sliceTo(&hctx.fsm_star_save, 0);
     if (std.mem.eql(u8, star, saved)) {
@@ -343,22 +334,20 @@ fn call_swe_rise_trans(tjd: f64, ipl: i32, star: []const u8, helflag: i32, event
     return swecl.swe_rise_trans(tjd, ipl, star2[0..n], iflag, eventtype, dgeo, atpress, attemp, tret, serr, swed, models, dctx, cctx);
 }
 
-/// swehel.c SunRA() — memoized by tjd (TLS statics)
+/// swehel.c SunRA() — memoized in ctx by tjd
 pub fn sunraTest(JDNDaysUT: f64, helflag: i32, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, hctx: *SwehelCtx) f64 {
     return SunRA(JDNDaysUT, helflag, serr, swed, models, dctx, hctx);
 }
 
 fn SunRA(JDNDaysUT: f64, helflag: i32, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: *DeltatCtx, hctx: *SwehelCtx) f64 {
-    _ = helflag; // C: helflag += 0 (unused)
-    _ = swed; // unused: the swe_calc branch is dead code (SIMULATE_VICTORVB)
+    _ = helflag; // unused
+    _ = swed;
     _ = models;
     _ = dctx;
     if (serr) |sr| sr[0] = 0;
     if (JDNDaysUT == hctx.sunra_tjdlast)
         return hctx.sunra_ralast;
-    // C's swe_calc branch sits in #ifndef SIMULATE_VICTORVB, and
-    // swephexp.h defines SIMULATE_VICTORVB = 1: it is DEAD CODE. The
-    // revjul approximation formula below always runs.
+    // Always uses the revjul approximation (C builds with SIMULATE_VICTORVB=1).
     const rv = swedate_mod.swe_revjul(JDNDaysUT, SE_GREG_CAL);
     hctx.sunra_tjdlast = JDNDaysUT;
     hctx.sunra_ralast = lib.swe_degnorm((@as(f64, @floatFromInt(rv.mon)) + (@as(f64, @floatFromInt(rv.day)) - 1) / 30.4 - 3.69) * 30);
@@ -549,7 +538,7 @@ fn kW(HeightEye: f64, TempS: f64, RH: f64) f64 {
     return WT;
 }
 
-/// swehel.c kOZ() — memoized (TLS statics)
+/// swehel.c kOZ() — memoized in ctx
 fn kOZ(AltS: f64, sunra: f64, Lat: f64, hctx: *SwehelCtx) f64 {
     var altslim: f64 = 0;
     if (AltS == hctx.koz_alts_last and sunra == hctx.koz_sunra_last)
@@ -587,7 +576,7 @@ fn Sgn(x: f64) i32 {
     return 1;
 }
 
-/// swehel.c ka() — memoized (TLS statics)
+/// swehel.c ka() — memoized in ctx
 fn ka(AltS: f64, sunra: f64, Lat: f64, HeightEye: f64, TempS: f64, RH: f64, VR: f64, serr: ?[]u8, hctx: *SwehelCtx) f64 {
     const SL: f64 = @floatFromInt(Sgn(Lat));
     // depending on day/night vision, lambda eye sensibility changes
@@ -626,7 +615,6 @@ fn ka(AltS: f64, sunra: f64, Lat: f64, HeightEye: f64, TempS: f64, RH: f64, VR: 
         }
     } else {
         // From Schaefer, Archaeoastronomy, XV, 2000, page 128
-        // (C's #ifdef SIMULATE_VICTORVB RH clamps: ACTIVE)
         var RH2 = RH;
         if (RH2 <= 0.00000001) RH2 = 0.00000001;
         if (RH2 >= 99.99999999) RH2 = 99.99999999;
@@ -686,7 +674,7 @@ fn PresEfromPresS(TempS: f64, Press: f64, HeightEye: f64) f64 {
     return Press * swe_shim_exp(-9.80665 * 0.0289644 / (Kelvin(TempS) + 3.25 * HeightEye / 1000) / 8.31441 * HeightEye);
 }
 
-/// swehel.c Deltam() — memoized (TLS statics)
+/// swehel.c Deltam() — memoized in ctx
 fn Deltam(AltO: f64, AltS: f64, sunra: f64, Lat: f64, HeightEye: f64, datm: *const [4]f64, helflag: i32, serr: ?[]u8, hctx: *SwehelCtx) f64 {
     const PresE = PresEfromPresS(datm[1], datm[0], HeightEye);
     const TempE = TempEfromTempS(datm[1], HeightEye, LapseSA);
@@ -880,9 +868,6 @@ fn default_heliacal_parameters(datm: *[4]f64, dgeo: *const [3]f64, dobs: *[6]f64
         if (datm[2] == 0)
             datm[2] = 40;
         // note: datm[3] / VR defaults outside this function
-    } else {
-        // (C's datm[2] clamps are #ifndef SIMULATE_VICTORVB — DEAD CODE,
-        // since swephexp.h defines SIMULATE_VICTORVB = 1)
     }
     // age of observer
     if (dobs[0] == 0)
@@ -1274,7 +1259,6 @@ pub fn swe_heliacal_pheno_ut(JDNDaysUT: f64, dgeo: *[3]f64, datm: *[4]f64, dobs:
         illum = attr[1] * 100;
     }
     kact = kt(AltS, sunra, dgeo[1], dgeo[2], datm[1], datm[2], datm[3], 4, serr, hctx);
-    // C's if ((0)) darr[26..30] block: dead code, not transcribed
     WMoon = 0;
     qYal = 0;
     qCrit = 0;
@@ -1927,7 +1911,6 @@ fn heliacal_ut_arc_vis(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
                     AziS = xaz[0] + 180;
                     if (AziS >= 360) AziS = AziS - 360;
                     AltS = xaz[1];
-                    // (C's #if 0 moon position block is dead code)
                     // determine object's position
                     if (Planet != -1) {
                         retval = sweph.swe_calc(tjd_tt, Planet, iflag, &x, swed, models, dctx, &serr);
@@ -1975,7 +1958,6 @@ fn heliacal_ut_arc_vis(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
             serr[r.len] = 0;
             break :blk; // goto swe_heliacal_err
         }
-        // (C's #if 0 swe_heliacal_pheno_ut block is dead code)
         var direct = TimeStepDefault / 24.0 / 60.0;
         if (DayStep < 0) direct = -direct;
         if ((helflag & SE_HELFLAG_AVKIND_VR) != 0) {
@@ -2010,7 +1992,6 @@ fn heliacal_ut_arc_vis(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
             }
             JDNarcvisUT = TbVR;
         }
-        // if (strncmp(AVkind, "pto", 3) == 0)
         if ((helflag & SE_HELFLAG_AVKIND_PTO) != 0) {
             while (true) {
                 OudeDatum = JDNarcvisUT;
@@ -2261,9 +2242,7 @@ fn get_heliacal_day(tjd_in: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f64, Ob
     var dmag: f64 = undefined;
     var div: f64 = undefined;
     const ipl = DeterObject(ObjectName);
-    //
     // find the day and minute on which the object becomes visible
-    //
     switch (TypeEvent) {
         // morning first
         1 => {
@@ -2614,7 +2593,6 @@ fn get_acronychal_day(tjd_in: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f64, 
         if (retval == ERR) return ERR;
         retval = time_limit_invisible(tjd, dgeo, datm, dobs, ObjectName, helflag | SE_HELFLAG_VISLIM_NOMOON, direct, &tret, serr, swed, models, dctx, cctx, hctx);
         if (retval == ERR) return ERR;
-        // (C's #if 0 azalt_cart branch is dead code)
         dtret = @abs(tret - tret_dark);
     }
     if (azalt_cart(tret, dgeo, datm, "sun", helflag, darr[0..6], serr, swed, models, dctx, cctx) == ERR)
@@ -2723,9 +2701,7 @@ fn heliacal_ut_vis_lim(tjd_start: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f
         tjd = tjd_start - 50; // -50 makes sure, that no event is missed,
     // but may return an event before start date
     blk: {
-        //
         // heliacal event
-        //
         if (ipl == SE_MERCURY or ipl == SE_VENUS or TypeEvent <= 2) {
             if (ipl == -1) {
                 // find date when star rises with sun (cosmic rising)
@@ -2743,9 +2719,7 @@ fn heliacal_ut_vis_lim(tjd_start: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f
             retval = get_heliacal_day(tjd, dgeo, datm, dobs, ObjectName, helflag2, TypeEvent, &tday, &serr, swed, models, dctx, cctx, hctx);
             if (retval != OK)
                 break :blk;
-            //
             // acronychal event
-            //
         } else {
             if (true or ipl == -1) {
                 retval = get_asc_obl_with_sun(tjd, ipl, ObjectName, helflag, TypeEvent, 0, dgeo, &tjd, &serr, swed, models, dctx);
@@ -2771,7 +2745,6 @@ fn heliacal_ut_vis_lim(tjd_start: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: *[6]f
                 retval = get_heliacal_details(dret[0], dgeo, datm, dobs, ObjectName, TypeEvent, helflag2, dret, &serr, swed, models, dctx, cctx, hctx);
                 if (retval == ERR) break :blk;
             }
-            // (C's else-if ((0)) dead branch not transcribed)
         }
     }
     // swe_heliacal_err:
@@ -2927,9 +2900,7 @@ pub fn swe_heliacal_ut(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
         }
         return ERR;
     }
-    //
     // Moon events
-    //
     if (Planet == SE_MOON) {
         if (TypeEvent == 1 or TypeEvent == 2) {
             if (serr_ret != null) {
@@ -2951,9 +2922,7 @@ pub fn swe_heliacal_ut(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
         }
         return retval;
     }
-    //
     // planets and fixed stars
-    //
     if ((helflag & SE_HELFLAG_AVKIND) == 0) {
         if (Planet == -1 or Planet >= SE_MARS) {
             if (TypeEvent == 3 or TypeEvent == 4) {
@@ -3002,9 +2971,7 @@ pub fn swe_heliacal_ut(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
     tadd = dsynperiod * 0.6;
     if (Planet == SE_MERCURY)
         tadd = 30;
-    //
     // this is the outer loop over n synodic periods
-    //
     retval = -2; // indicates that another synodic period has to be done
     tjd = tjd0;
     while (tjd < tjdmax and retval == -2) : (tjd += tadd) {
@@ -3019,9 +2986,7 @@ pub fn swe_heliacal_ut(JDNDaysUTStart: f64, dgeo: *[3]f64, datm: *[4]f64, dobs: 
             retval = heliacal_ut(tjd, dgeo, datm, dobs, oname, TypeEventMut, helflag, dret, &serr, swed, models, dctx, cctx, hctx);
         }
     }
-    //
     // no event was found within MaxCountSynodicPeriod, return error
-    //
     if ((helflag & SE_HELFLAG_SEARCH_1_PERIOD) != 0 and (retval == -2 or dret[0] > tjd0 + dsynperiod * 1.5)) {
         const msg = "no heliacal date found within this synodic period";
         const n = @min(msg.len, serr.len);

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- Delta-T module.
-// Translated 1:1 from swephlib.c (swe_deltat_ex / calc_deltat and the
-// delta-T model + tidal-acceleration helpers) to preserve exact operation
-// order, differential-tested against the C oracle.
+// Swiss Ephemeris Zig port — Delta-T module. Port of swephlib.c Delta-T.
 const std = @import("std");
 const tbl = @import("tables_deltat.zig");
 

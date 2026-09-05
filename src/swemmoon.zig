@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- swemmoon module (Moshier moon).
-// Translated 1:1 from swemmoon.c to preserve exact floating-point
-// operation order, differential-tested against the C oracle.
-// The `swed.oec` obliquity and the astro_models entries that sweph.c
-// threads through swi_epsiln/swi_precess are passed explicitly
-// (same pattern as DeltatCtx); the SEI_MOON plan_data cache is kept
-// as module state like C's swed.pldat[SEI_MOON].
+// Swiss Ephemeris Zig port — swemmoon module (Moshier moon). Port of swemmoon.c.
 const std = @import("std");
 const lib = @import("swephlib");
 
@@ -231,7 +225,7 @@ const NLRT2: usize = 25;
 const NBT2: usize = 12;
 
 // --- file static state (swemmoon.c; TLS in C, plain here) ---
-/// Moshier moon workspace + save area (was swemmoon.c file statics; TLS
+/// Moshier moon workspace + save area (was swemmoon.c file statics;
 /// there). Lives in Swed so each instance owns its computation context:
 /// ss/cc are lazily built per date range, pdp_* is the moon position cache
 /// (swed.pldat[SEI_MOON] equivalent fields swi_moshmoon touches).

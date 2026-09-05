@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- swemplan module (Moshier planets).
-// Translated 1:1 from swemplan.c to preserve exact floating-point
-// operation order, differential-tested against the C oracle.
-// swed.oec / swed.oec2000 obliquities and the astro_models entries that
-// sweph.c threads through swi_epsiln/swi_precess are passed explicitly
-// (same pattern as DeltatCtx); the plan_data caches are kept as module
-// state like C's swed.pldat[].
+// Swiss Ephemeris Zig port — swemplan module (Moshier planets). Port of swemplan.c.
 const std = @import("std");
 const lib = @import("swephlib");
 const sweph = @import("sweph");
@@ -101,8 +95,7 @@ pub const phases = [9]f64{
     860492.1546,
 };
 
-/// Moshier sin/cos multiple-angle workspace (was C file statics ss/cc;
-/// TLS there). Lives in Swed so each instance has its own; sscc() fills
+/// Moshier sin/cos multiple-angle workspace (was C file statics ss/cc). Lives in Swed so each instance has its own; sscc() fills
 /// it and swi_moshplan2() reads it within the same call chain.
 pub const PlanWs = struct {
     ss: [9][24]f64 = undefined,
@@ -2529,9 +2522,7 @@ fn appendSerr(serr: []u8, s: []const u8) void {
     }
 }
 
-// ---------------------------------------------------------------------------
 // Fictitious planets (swemplan.c 500-967)
-// ---------------------------------------------------------------------------
 
 pub const FICT_GEO: i32 = 1;
 const KGAUSS: f64 = 0.01720209895; // Gaussian gravitational constant K6
@@ -2826,7 +2817,6 @@ fn check_t_terms(t: f64, sinp_in: []const u8, doutp: *f64, sbuf: *[AS_MAXCH]u8) 
     @memcpy(sbuf[0..inlen], sinp_in[0..inlen]);
     sbuf[inlen] = 0;
     const sp0: [*]u8 = @ptrCast(&sbuf[0]);
-    // if ((sp = strpbrk(sinp, "+-")) != NULL) retc = 1;
     {
         var k: usize = 0;
         while (k < inlen) : (k += 1) {

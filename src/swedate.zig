@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port — Phase 0: swedate functions.
-// Translated 1:1 from swedate.c to preserve exact floating-point
-// operation order (differential-tested against the C oracle).
+// Swiss Ephemeris Zig port — swedate module. Port of swedate.c.
 
 pub const SE_JUL_CAL: i32 = 0;
 pub const SE_GREG_CAL: i32 = 1;

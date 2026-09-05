@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
 // Port of swejpl.c: JPL binary ephemeris file I/O and interpolation.
-// 1:1 translation — same operation order, same constants, same rounding.
-// The C TLS function-local statics (interp()'s np/nv/nac/njk/twot and
-// state()'s swed.jpl.irecsz/swed.jpl.nrl/swed.jpl.ncoeffs) plus the js save area live in JplCtx,
-// held by Swed.jpl: they persist across swi_close_jpl_file/swi_open_jpl_file
-// exactly like the C statics, per instance.
+// C statics live in JplCtx (held by Swed.jpl), per instance like C.
 const std = @import("std");
 const lib = @import("swephlib");
 const sweph = @import("sweph");
@@ -58,7 +54,7 @@ const JplSave = struct {
 };
 
 /// Per-instance JPL ephemeris context: swi_open/close state (js) plus the
-/// interp()/state() function-local statics of swejpl.c (TLS there). Lives
+/// interp()/state() locals of swejpl.c live
 /// in Swed so each instance owns its file handle and caches.
 pub const JplCtx = struct {
     js: JplSave = .{},

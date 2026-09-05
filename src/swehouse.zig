@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- swehouse module.
-// Translated 1:1 from swehouse.c to preserve exact floating-point
-// operation order, differential-tested against the C oracle.
+// Swiss Ephemeris Zig port — swehouse module. Port of swehouse.c.
 const std = @import("std");
 const lib = @import("swephlib");
 
@@ -25,7 +23,7 @@ pub const ARMCS: f64 = (SOLAR_YEAR + 1.0) / SOLAR_YEAR * 360.0;
 pub const SUNSHINE_KEEP_MC_SOUTH: i32 = 0;
 pub const ERR: i32 = -1;
 pub const OK: i32 = 0;
-/// Sunshine-house memo (was swehouse.c file static saved_sundec; TLS in C).
+/// Sunshine-house memo (was swehouse.c file static saved_sundec).
 /// Lives beside the API: each caller owns one (SweState.house in the ABI).
 pub const HouseCtx = struct {
     saved_sundec: f64 = 99.0,

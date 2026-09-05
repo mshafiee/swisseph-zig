@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- swecl module (eclipse/phenomena machinery).
-// Translated 1:1 from swecl.c to preserve exact floating-point operation
-// order, differential-tested against the C oracle.
-//
-// Scope so far (needed by swehel): the refraction family (swe_refrac,
-// swe_refrac_extended, swe_set_lapse_rate + statics calc_dip /
-// calc_astronomical_refr) and the horizon transforms (swe_azalt,
-// swe_azalt_rev). Deferred: eclipses, occultations, nod_aps, gauquelin.
-// C globals -> explicit context:
-//   const_lapse_rate (file-static TLS in swecl.c) -> SweclCtx field
+// Swiss Ephemeris Zig port — swecl module (eclipse/phenomena machinery).
+// Port of swecl.c; see docs/parity.md for the bit-parity contract.
+// C file-static state lives in SweclCtx.
 const std = @import("std");
 const lib = @import("swephlib");
 const deltat_mod = @import("deltat");
@@ -57,8 +50,7 @@ pub fn swe_set_lapse_rate(lapse_rate: f64, ctx: *SweclCtx) void {
     ctx.const_lapse_rate = lapse_rate;
 }
 
-/// swecl.c calc_astronomical_refr() — Sinclair formula (the active branch;
-/// the Bennett formula sits in a #if 0 block in C).
+/// swecl.c calc_astronomical_refr() — Sinclair formula.
 fn calc_astronomical_refr(inalt: f64, atpress: f64, attemp: f64) f64 {
     var r: f64 = undefined;
     if (inalt > 17.904104638432) { // for continuous function, instead of '>15'
@@ -78,8 +70,7 @@ fn calc_dip(geoalt: f64, atpress: f64, attemp: f64, lapse_rate: f64) f64 {
     return -180.0 / PI * swe_shim_acos(1 / (1 + geoalt / EARTH_RADIUS)) * @sqrt(d);
 }
 
-/// swecl.c swe_refrac() — Meeus algorithm (the active branch; the Moshier
-/// iteration sits in a #if 0 block in C).
+/// swecl.c swe_refrac() — Meeus algorithm.
 pub fn swe_refrac(inalt: f64, atpress: f64, attemp: f64, calc_flag: i32) f64 {
     var a: f64 = undefined;
     var refr: f64 = undefined;
@@ -323,9 +314,7 @@ fn nutInterp(swed: *Swed) ?*lib.Interp {
     return if (swed.do_interpolate_nut) &swed.interp else null;
 }
 
-// ---------------------------------------------------------------------------
 // swe_pheno / swe_pheno_ut  (swecl.c)
-// ---------------------------------------------------------------------------
 
 pub const SE_SUN: i32 = 0;
 pub const SE_MOON: i32 = 1;
@@ -425,9 +414,7 @@ const pla_diam = [NDIAM]f64{
 };
 
 /// swecl.c swe_pheno() — phase, angle, elongation, diameter, magnitude,
-/// parallax. MAG_MALLAMA_2018 = 1 and MAG_MOON_VREIJS = 1 (active defines);
-/// the #else branches are dead code in C and not transcribed.
-/// attr must have room for 20 doubles.
+/// parallax. attr must have room for 20 doubles.
 pub fn swe_pheno(
     tjd: f64,
     ipl_in: i32,
@@ -474,9 +461,7 @@ pub fn swe_pheno(
         SEFLG_NOABERR);
     iflagp |= SEFLG_HELCTR;
     var epheflag = iflag & SEFLG_EPHMASK;
-    //
     // geocentric planet
-    //
     const retflag = sweph.swe_calc(tjd, ipl, iflag | SEFLG_XYZ, &xx, swed, models, dctx, serr);
     if (retflag == lib.ERR)
         return lib.ERR;
@@ -500,31 +485,21 @@ pub fn swe_pheno(
         ipl != SE_MEAN_NODE and ipl != SE_TRUE_NODE and
         ipl != SE_MEAN_APOG and ipl != SE_OSCU_APOG)
     {
-        //
         // light time planet - earth
-        //
         dt = lbr[2] * AUNIT / CLIGHT / 86400.0;
         if ((iflag & SEFLG_TRUEPOS) != 0)
             dt = 0;
-        //
         // heliocentric planet at tjd - dt
-        //
         if (sweph.swe_calc(tjd - dt, ipl, iflagp | SEFLG_XYZ, &xx2, swed, models, dctx, serr) == lib.ERR)
             return lib.ERR;
         if (sweph.swe_calc(tjd - dt, ipl, iflagp, &lbr2, swed, models, dctx, serr) == lib.ERR)
             return lib.ERR;
-        //
         // phase angle
-        //
         attr[0] = swe_shim_acos(lib.swi_dot_prod_unit(xx[0..3], xx2[0..3])) * RADTODEG;
-        //
         // phase
-        //
         attr[1] = (1 + swe_shim_cos(attr[0] * DEGTORAD)) / 2;
     }
-    //
     // apparent diameter of disk
-    //
     if (ipl >= 0 and @as(usize, @intCast(ipl)) < NDIAM) {
         dd = pla_diam[@intCast(ipl)];
     } else if (ipl > SE_AST_OFFSET) {
@@ -536,9 +511,7 @@ pub fn swe_pheno(
         attr[3] = 180 // assume position on surface of earth
     else
         attr[3] = swe_shim_asin(dd / 2 / AUNIT / lbr[2]) * 2 * RADTODEG;
-    //
     // apparent magnitude
-    //
     if (ipl > SE_AST_OFFSET or (ipl >= 0 and @as(usize, @intCast(ipl)) < NMAG_ELEM and mag_elem[@intCast(ipl)][0] < 99)) {
         if (ipl == SE_SUN) {
             // ratio apparent diameter : average diameter
@@ -670,9 +643,7 @@ pub fn swe_pheno(
         }
     }
     if (ipl != SE_SUN and ipl != SE_EARTH) {
-        //
         // elongation of planet
-        //
         if (sweph.swe_calc(tjd, SE_SUN, iflag | SEFLG_XYZ, &xx2, swed, models, dctx, serr) == lib.ERR)
             return lib.ERR;
         if (sweph.swe_calc(tjd, SE_SUN, iflag, &lbr2, swed, models, dctx, serr) == lib.ERR)
@@ -738,9 +709,7 @@ pub fn swe_pheno_ut(
     return retflag;
 }
 
-// ---------------------------------------------------------------------------
 // rise, set, and meridian transits  (swecl.c)
-// ---------------------------------------------------------------------------
 
 pub const SE_CALC_RISE: i32 = 1;
 pub const SE_CALC_SET: i32 = 2;
@@ -892,7 +861,6 @@ fn rise_set_fast(
         mdrise = lib.swe_degnorm(sda * @as(f64, @floatFromInt(facrise)));
         dmd = lib.swe_degnorm(md - mdrise);
         // Avoid the risk of getting the event of next day:
-        // (C's #if 0 variant `tjd_ut -= 0.1; goto run_rise_again` is dead code)
         if (dmd > 358) {
             dmd -= 360;
         }
@@ -932,8 +900,6 @@ fn rise_set_fast(
             } else if (dt < -0.1) {
                 dt = -0.1;
             }
-            // C: if ((0) && fabs(dt) > 5.0 / 86400.0 && nloop < 20) nloop++;
-            // — dead code, never taken
             tr -= dt;
         }
         // if the event found is before input time, we search next event.
@@ -1359,9 +1325,7 @@ fn calc_mer_trans(
         if (sweph.swe_calc(tjd_et, ipl, iflag, &x0, swed, models, dctx, serr) == lib.ERR)
             return lib.ERR;
     }
-    //
     // meridian transits
-    //
     x[0] = x0[0];
     x[1] = x0[1];
     var t = tjd_ut;
@@ -1395,9 +1359,7 @@ fn calc_mer_trans(
     return lib.OK;
 }
 
-// ---------------------------------------------------------------------------
 // nodes, apsides, orbital elements, gauquelin sector  (swecl.c)
-// ---------------------------------------------------------------------------
 
 pub const SE_NODBIT_MEAN: i32 = 1;
 pub const SE_NODBIT_OSCU: i32 = 2;
@@ -1626,9 +1588,7 @@ pub fn swe_nod_aps(
     const xnd = xx[6..12];
     const xpe = xx[12..18];
     const xap = xx[18..24];
-    //
     // mean nodes and apsides
-    //
     // mean points only for Sun - Neptune
     if ((method == 0 or (method & SE_NODBIT_MEAN) != 0) and
         ((ipl >= SE_SUN and ipl <= SE_NEPTUNE) or ipl == SE_EARTH))
@@ -1729,9 +1689,7 @@ pub fn swe_nod_aps(
             xp[4] *= DEGTORAD;
             lib.swi_polcart_sp(xp[0..6], xp[0..6]);
         }
-        //
         // "true" or osculating nodes and apsides
-        //
     } else {
         // first, we need a heliocentric distance of the planet
         if (sweph.swe_calc(tjd_et, @intCast(ipli), iflg0, &x, swed, models, dctx, serr) == lib.ERR)
@@ -1903,9 +1861,7 @@ pub fn swe_nod_aps(
         if (sweph.swe_calc(tjd_et, @intCast(ipli), iflg0 | (iflag & sweph.SEFLG_TOPOCTR), &x, swed, models, dctx, serr) == lib.ERR)
             return lib.ERR;
     }
-    //
     // position of observer
-    //
     if ((iflag & sweph.SEFLG_TOPOCTR) != 0) {
         // geocentric position of observer
         if (sweph.swi_get_observer(tjd_et, iflag, false, &xobs, swed, models, dctx, serr) != lib.OK)
@@ -1937,9 +1893,7 @@ pub fn swe_nod_aps(
         oe = &swed.oec2000
     else
         oe = &swed.oec;
-    //
     // conversions shared by mean and osculating points
-    //
     ij = 0;
     xp = xx[0..];
     while (ij < 4) : ({
@@ -1952,9 +1906,7 @@ pub fn swe_nod_aps(
                 xp[k] = 0;
             continue;
         }
-        //
         // to equator
-        //
         if (is_true_nodaps and (iflag & sweph.SEFLG_NONUT) == 0) {
             lib.swi_coortrf2(xp[0..3], xp[0..3], -swed.nut.snut, swed.nut.cnut);
             if ((iflag & sweph.SEFLG_SPEED) != 0)
@@ -1963,21 +1915,15 @@ pub fn swe_nod_aps(
         lib.swi_coortrf2(xp[0..3], xp[0..3], -oe.seps, oe.ceps);
         lib.swi_coortrf2(xp[3..6], xp[3..6], -oe.seps, oe.ceps);
         if (is_true_nodaps) {
-            //
             // to mean ecliptic of date
-            //
             if ((iflag & sweph.SEFLG_NONUT) == 0)
                 sweph.swi_nutate(xp[0..6], iflag, true, swed);
         }
-        //
         // to J2000
-        //
         _ = lib.swi_precess(xp[0..3], tjd_et, iflag, lib.J_TO_J2000, models);
         if ((iflag & sweph.SEFLG_SPEED) != 0)
             sweph.swi_precess_speed(xp[0..6], tjd_et, iflag, lib.J_TO_J2000, swed, models);
-        //
         // to barycenter
-        //
         if (ipli == @as(usize, @intCast(SE_MOON))) {
             for (0..6) |k|
                 xp[k] += xear[k];
@@ -1987,9 +1933,7 @@ pub fn swe_nod_aps(
                     xp[k] += xsun[k];
             }
         }
-        //
         // to correct center
-        //
         for (0..6) |k|
             xp[k] -= xobs[k];
         // geocentric perigee/apogee of sun
@@ -1997,15 +1941,11 @@ pub fn swe_nod_aps(
             for (0..6) |k|
                 xp[k] = -xp[k];
         }
-        //
         // light deflection
-        //
         dt = @sqrt(sweph.square_sum(xp[0..6])) * AUNIT / CLIGHT / 86400.0;
         if (do_defl)
             sweph.swi_deflect_light(xp[0..6], dt, iflag, swed);
-        //
         // aberration
-        //
         if (do_aberr) {
             sweph.swi_aberr_light(xp[0..6], &xobs, iflag);
             // Apparent speed is also influenced by the difference of speed
@@ -2044,9 +1984,7 @@ pub fn swe_nod_aps(
                     return lib.ERR;
             }
         }
-        //
         // precession
-        //
         // save J2000 coordinates; required for sidereal positions
         for (0..6) |k|
             x2000[k] = xp[k];
@@ -2055,9 +1993,7 @@ pub fn swe_nod_aps(
             if ((iflag & sweph.SEFLG_SPEED) != 0)
                 sweph.swi_precess_speed(xp[0..6], tjd_et, iflag, lib.J2000_TO_J, swed, models);
         }
-        //
         // nutation
-        //
         if ((iflag & sweph.SEFLG_NONUT) == 0)
             sweph.swi_nutate(xp[0..6], iflag, false, swed);
         // now we have equatorial cartesian coordinates; keep them
@@ -2065,10 +2001,8 @@ pub fn swe_nod_aps(
         var xreturn: [24]f64 = undefined;
         for (0..6) |k|
             xreturn[18 + k] = xp[k];
-        //
         // transformation to ecliptic.
         // with sidereal calc. this will be overwritten afterwards.
-        //
         lib.swi_coortrf2(xp[0..3], xp[0..3], oe.seps, oe.ceps);
         if ((iflag & sweph.SEFLG_SPEED) != 0)
             lib.swi_coortrf2(xp[3..6], xp[3..6], oe.seps, oe.ceps);
@@ -2080,9 +2014,7 @@ pub fn swe_nod_aps(
         // now we have ecliptic cartesian coordinates
         for (0..6) |k|
             xreturn[6 + k] = xp[k];
-        //
         // sidereal positions
-        //
         if ((iflag & sweph.SEFLG_SIDEREAL) != 0) {
             // project onto ecliptic t0
             if ((swed.sidd.sid_mode & sweph.SE_SIDBIT_ECL_T0) != 0) {
@@ -2111,14 +2043,10 @@ pub fn swe_nod_aps(
                 xp[k] = xreturn[6 + k];
             continue;
         }
-        //
         // transformation to polar coordinates
-        //
         lib.swi_cartpol_sp(xreturn[18..24], xreturn[12..18]);
         lib.swi_cartpol_sp(xreturn[6..12], xreturn[0..6]);
-        //
         // radians to degrees
-        //
         if ((iflag & sweph.SEFLG_RADIANS) == 0) {
             for (0..2) |k| {
                 xreturn[k] *= RADTODEG; // ecliptic
@@ -2211,7 +2139,6 @@ fn get_gmsm(tjd_et: f64, ipl: i32, iflag: i32, r: f64, gmsm: *f64, serr: ?[]u8, 
                 plm = 1.0 / plmass[@intCast(ipl_to_elem[@intCast(ipl)])];
             }
             Gmsm = HELGRAVCONST * (1 + plm) / AUNIT / AUNIT / AUNIT * 86400.0 * 86400.0;
-            // (C's TEST_ORBEL_AA #ifdef block: dead code)
             // asteroid or fictitious object
         } else {
             plm = 0;
@@ -2397,7 +2324,6 @@ pub fn swe_get_orbital_elements(
     xq[0] += swe_shim_atan2(sinnode, cosnode);
     xa[0] = lib.swi_mod2PI(xq[0] + PI);
     xa[1] = -xq[1];
-    // (C's do_focal_point #if 0 block is dead code)
     xa[2] = sema * (1 + ecce); // distance of aphelion
     lib.swi_polcart(xq[0..3], xq[0..3]);
     lib.swi_polcart(xa[0..3], xa[0..3]);
@@ -2803,9 +2729,7 @@ pub fn swe_gauquelin_sector(
     // are treated as calls for Pluto as main body SE_PLUTO
     if (ipl == SE_AST_OFFSET + 134340)
         ipl = SE_PLUTO;
-    //
     // geometrically from ecl. longitude and latitude
-    //
     if (imeth == 0 or imeth == 1) {
         // C's swe_deltat_ex reads the moon-file denum live; refresh first
         dctx.sweph_denum = swed.fidat[sweph.SEI_FILE_MOON].sweph_denum;
@@ -2831,9 +2755,7 @@ pub fn swe_gauquelin_sector(
         dgsect.* = houses.swe_house_pos(armc, geopos[1], eps + nutlo[1], 'G', &x0, null, &gsect_hctx);
         return lib.OK;
     }
-    //
     // from rise and set times
-    //
     if (imeth == 2 or imeth == 4)
         risemeth |= SE_BIT_NO_REFRACTION;
     if (imeth == 2 or imeth == 3)
@@ -2902,9 +2824,7 @@ pub fn swe_gauquelin_sector(
     }
 }
 
-// ---------------------------------------------------------------------------
 // eclipses & occultations  (swecl.c)
-// ---------------------------------------------------------------------------
 
 pub const SE_ECL_CENTRAL: i32 = 1;
 pub const SE_ECL_NONCENTRAL: i32 = 2;
@@ -3099,9 +3019,7 @@ fn eclipse_where(
         sidt = lib.swe_sidtime0(tjd_ut, oe.eps * RADTODEG, 0, models, dctx, nutInterp(swed)) * 15 * DEGTORAD
     else
         sidt = lib.swe_sidtime(tjd_ut, models, dctx, nutInterp(swed)) * 15 * DEGTORAD;
-    //
     // radius of planet disk in AU
-    //
     if (starname != null and starname.?.len > 0 and starname.?[0] != 0)
         drad = 0
     else if (ipl >= 0 and @as(usize, @intCast(ipl)) < NDIAM_ECL)
@@ -3161,9 +3079,7 @@ fn eclipse_where(
         dcore[6] = cosf2;
         for (2..5) |i|
             dcore[i] *= AUNIT / 1000.0;
-        //
         // central (total or annular) phase
-        //
         retc = 0;
         if (de * cosf1 >= r0) {
             retc |= SE_ECL_CENTRAL;
@@ -3305,9 +3221,7 @@ fn eclipse_how(
         return lib.ERR;
     if (sweph.swe_calc(te, SE_MOON, iflagcart, &xm, swed, models, dctx, serr) == lib.ERR)
         return lib.ERR;
-    //
     // radius of planet disk in AU
-    //
     if (starname != null and starname.?.len > 0 and starname.?[0] != 0)
         drad = 0
     else if (ipl >= 0 and @as(usize, @intCast(ipl)) < NDIAM_ECL)
@@ -3316,10 +3230,8 @@ fn eclipse_how(
         drad = swed.ast_diam / 2 * 1000 / AUNIT // km -> m -> AU
     else
         drad = 0;
-    //
     // azimuth and altitude of sun or planet
     // (USE_AZ_NAV = 0: the swe_azalt variant is active)
-    //
     swe_azalt(tjd_ut, SE_EQU2HOR, &geopos, 0, 10, ls[0..3], xh[0..3], swed, models, dctx, cctx); // azimuth from south, clockwise, via west
     // eclipse description
     rmoon = swe_shim_asin(RMOON / lm[2]) * RADTODEG;
@@ -3331,9 +3243,7 @@ fn eclipse_how(
         x2[i] = xm[i] / lm[2];
     }
     dctr = swe_shim_acos(lib.swi_dot_prod_unit(x1[0..3], x2[0..3])) * RADTODEG;
-    //
     // phase
-    //
     if (dctr < rsminusrm)
         retc = SE_ECL_ANNULAR
     else if (dctr < @abs(rsminusrm))
@@ -3347,17 +3257,13 @@ fn eclipse_how(
             if (r2.len < serr.?.len) serr.?[r2.len] = 0;
         }
     }
-    //
     // ratio of diameter of moon to that of sun
-    //
     if (rsun > 0)
         attr[1] = rmoon / rsun
     else
         attr[1] = 0;
-    //
     // eclipse magnitude:
     // fraction of solar diameter covered by moon
-    //
     lsun = swe_shim_asin(rsun / 2 * DEGTORAD) * 2;
     lsunleft = (-dctr + rsun + rmoon);
     if (lsun > 0) {
@@ -3365,10 +3271,8 @@ fn eclipse_how(
     } else {
         attr[0] = 1;
     }
-    //
     // obscuration:
     // fraction of solar disc obscured by moon
-    //
     lsun = rsun;
     lmoon = rmoon;
     lctr = dctr;
@@ -3685,10 +3589,8 @@ pub fn swe_sol_eclipse_when_glob(
         M *= DEGTORAD;
         Mm *= DEGTORAD;
         tjd = tjd - 0.4075 * swe_shim_sin(Mm) + 0.1721 * E * swe_shim_sin(M);
-        //
         // time of maximum eclipse (if eclipse) =
         // minimum geocentric angle between sun and moon edges.
-        //
         dtstart = 1;
         if (tjd < 2000000 or tjd > 2500000)
             dtstart = 5;
@@ -3749,10 +3651,8 @@ pub fn swe_sol_eclipse_when_glob(
             K += @floatFromInt(direction);
             continue; // goto next_try
         }
-        //
         // eclipse type, SE_ECL_TOTAL, _ANNULAR, etc.
         // SE_ECL_ANNULAR_TOTAL will be discovered later
-        //
         retflag = eclipse_where(tjd, SE_SUN, null, ifl, geopos[0..2], &dcore, serr, swed, models, dctx, cctx);
         if (retflag == lib.ERR)
             return retflag;
@@ -3762,9 +3662,7 @@ pub fn swe_sol_eclipse_when_glob(
             tret[5] = tjd; // fix this ????
             dont_times = true;
         }
-        //
         // check whether or not eclipse type found is wanted
-        //
         // non central eclipse is wanted:
         if ((ifltype & SE_ECL_NONCENTRAL) == 0 and (retflag & SE_ECL_NONCENTRAL) != 0) {
             K += @floatFromInt(direction);
@@ -3792,11 +3690,9 @@ pub fn swe_sol_eclipse_when_glob(
         }
         if (dont_times)
             return retflag; // goto end_search_global
-        //
         // n = 0: times of eclipse begin and end
         // n = 1: times of totality begin and end
         // n = 2: times of center line begin and end
-        //
         var o: i32 = undefined;
         if ((retflag & SE_ECL_PARTIAL) != 0)
             o = 0
@@ -3871,9 +3767,7 @@ pub fn swe_sol_eclipse_when_glob(
                 }
             }
         }
-        //
         // annular-total eclipses
-        //
         if ((retflag & SE_ECL_TOTAL) != 0) {
             retflag2 = eclipse_where(tret[0], SE_SUN, null, ifl, geopos[0..2], &dcore, serr, swed, models, dctx, cctx);
             if (retflag2 == lib.ERR)
@@ -3905,9 +3799,7 @@ pub fn swe_sol_eclipse_when_glob(
             K += @floatFromInt(direction);
             continue;
         }
-        //
         // time of maximum eclipse at local apparent noon
-        //
         // first, find out, if there is a solar transit
         // between begin and end of eclipse
         const k: usize = 2;
@@ -3998,9 +3890,7 @@ pub fn swe_sol_eclipse_when_loc(
     var retflag = eclipse_when_loc(tjd_start, ifl, geopos, tret, attr, backward, serr, swed, models, dctx, cctx);
     if (retflag <= 0)
         return retflag;
-    //
     // diameter of core shadow
-    //
     var geopos2: [2]f64 = undefined;
     var dcore: [10]f64 = undefined;
     const retflag2 = eclipse_where(tret[0], SE_SUN, null, ifl, &geopos2, &dcore, serr, swed, models, dctx, cctx);
@@ -4097,7 +3987,6 @@ fn eclipse_when_loc(
         tjd = 2451550.09765 + 29.530588853 * K + 0.0001337 * T2 - 0.000000150 * T3 + 0.00000000073 * T4;
         M = lib.swe_degnorm(2.5534 + 29.10535669 * K - 0.0000218 * T2 - 0.00000011 * T3);
         Mm = lib.swe_degnorm(201.5643 + 385.81693528 * K + 0.1017438 * T2 + 0.00001239 * T3 + 0.000000058 * T4);
-        // Om / A1 comments: dead code in C
         E = 1 - 0.002516 * T - 0.0000074 * T2;
         M *= DEGTORAD;
         Mm *= DEGTORAD;
@@ -4329,9 +4218,7 @@ fn eclipse_when_loc(
         dctx.sweph_denum = swed.fidat[sweph.SEI_FILE_MOON].sweph_denum;
         dctx.jpldenum = swed.jpldenum;
         tret[4] -= deltat_mod.swe_deltat_ex(dctx, tret[4], ifl);
-        //
         // visibility of eclipse phases
-        //
         {
             var i: i32 = 4;
             while (i >= 0) : (i -= 1) { // attr for i = 0 must be kept !!!
@@ -4474,9 +4361,7 @@ pub fn swe_lun_occult_when_glob(
     iflag = sweph.SEFLG_EQUATORIAL | ifl;
     iflagcart = iflag | sweph.SEFLG_XYZ;
     backward &= 1;
-    //
     // initializations
-    //
     if (ifltype == (SE_ECL_PARTIAL | SE_ECL_CENTRAL)) {
         if (serr != null) {
             const msg = "central partial eclipses do not exist";
@@ -4561,9 +4446,7 @@ pub fn swe_lun_occult_when_glob(
             tjd = t;
             continue; // goto next_try
         }
-        //
         // radius of planet disk in AU
-        //
         if (stararg != null and stararg.?.len > 0 and stararg.?[0] != 0)
             drad = 0
         else if (ipl >= 0 and @as(usize, @intCast(ipl)) < NDIAM_ECL)
@@ -4572,10 +4455,8 @@ pub fn swe_lun_occult_when_glob(
             drad = swed.ast_diam / 2 * 1000 / AUNIT // km -> m -> AU
         else
             drad = 0;
-        //
         // time of maximum eclipse (if eclipse) =
         // minimum geocentric angle between moon and body edges.
-        //
         dtstart = dadd2; // originally 1
         dtdiv = 3;
         dt = dtstart;
@@ -4630,9 +4511,7 @@ pub fn swe_lun_occult_when_glob(
             tjd = t;
             continue;
         }
-        //
         // eclipse type, SE_ECL_TOTAL, _ANNULAR, etc.
-        //
         retflag = eclipse_where(tjd, ipl, stararg, ifl, geopos[0..2], &dcore, serr, swed, models, dctx, cctx);
         if (retflag == lib.ERR)
             return retflag;
@@ -4642,9 +4521,7 @@ pub fn swe_lun_occult_when_glob(
             tret[5] = tjd; // fix this ????
             dont_times = true;
         }
-        //
         // check whether or not eclipse type found is wanted
-        //
         if ((ifltype & SE_ECL_NONCENTRAL) == 0 and (retflag & SE_ECL_NONCENTRAL) != 0) {
             t = tjd + @as(f64, @floatFromInt(direction)) * 20;
             if (one_try != 0) {
@@ -4692,11 +4569,9 @@ pub fn swe_lun_occult_when_glob(
         }
         if (dont_times)
             return retflag; // goto end_search_global
-        //
         // n = 0: times of eclipse begin and end
         // n = 1: times of totality begin and end
         // n = 2: times of center line begin and end
-        //
         var o: i32 = undefined;
         if ((retflag & SE_ECL_PARTIAL) != 0)
             o = 0
@@ -4771,9 +4646,7 @@ pub fn swe_lun_occult_when_glob(
                 }
             }
         }
-        //
         // annular-total eclipses
-        //
         if ((retflag & SE_ECL_TOTAL) != 0) {
             retflag2 = eclipse_where(tret[0], ipl, stararg, ifl, geopos[0..2], &dcore, serr, swed, models, dctx, cctx);
             if (retflag2 == lib.ERR)
@@ -4815,9 +4688,7 @@ pub fn swe_lun_occult_when_glob(
             tjd = t;
             continue;
         }
-        //
         // time of maximum eclipse at local apparent noon
-        //
         // first, find out, if there is a solar transit
         // between begin and end of eclipse
         const k: usize = 2;
@@ -4961,7 +4832,6 @@ fn occult_when_loc(
     if (ipl < 0) ipl = 0;
     // next_try:
     outer: while (true) {
-        //is_partial = FALSE;
         if (calc_planet_star(t, ipl, stararg, iflaggeo, &ls, serr, swed, models, dctx) == lib.ERR)
             return lib.ERR;
         // fixed stars with an ecliptic latitude > 7 or < -7 cannot have
@@ -5000,9 +4870,7 @@ fn occult_when_loc(
             tjd = t;
             continue; // goto next_try
         }
-        //
         // radius of planet disk in AU
-        //
         if (stararg != null and stararg.?.len > 0 and stararg.?[0] != 0)
             drad = 0
         else if (ipl >= 0 and @as(usize, @intCast(ipl)) < NDIAM_ECL)
@@ -5105,7 +4973,6 @@ fn occult_when_loc(
         if (dctr > @abs(rsminusrm)) { // partial, no 2nd and 3rd contact
             tret[2] = 0;
             tret[3] = 0;
-            //is_partial = TRUE;
         } else {
             dc[1] = @abs(rsminusrm) - dctrmin;
             {
@@ -5179,7 +5046,6 @@ fn occult_when_loc(
             dctx.sweph_denum = swed.fidat[sweph.SEI_FILE_MOON].sweph_denum;
             dctx.jpldenum = swed.jpldenum;
             tret[3] -= deltat_mod.swe_deltat_ex(dctx, tret[3], ifl);
-            //is_partial = FALSE;
         }
         // contacts 1 and 4
         dc[1] = rsplusrm - dctrmin;
@@ -5255,9 +5121,7 @@ fn occult_when_loc(
             tret[1] = tret[2];
             tret[4] = tret[3];
         }
-        //
         // visibility of eclipse phases
-        //
         {
             var i: i32 = 4;
             while (i >= 0) : (i -= 1) { // attr for i = 0 must be kept !!!
@@ -5305,7 +5169,6 @@ fn occult_when_loc(
                 tret[6] = tjds;
         }
         // note, circumpolar sun above horizon is not tested
-        //if (!is_partial) {
         retc = swe_rise_trans(tret[1], SE_SUN, null, iflag, SE_CALC_RISE, geopos, 0, 0, &tjdr, serr, swed, models, dctx, cctx);
         if (retc == lib.ERR)
             return lib.ERR;
@@ -5330,7 +5193,6 @@ fn occult_when_loc(
                     retflag |= SE_ECL_OCC_END_DAYLIGHT;
             }
         }
-        //}
         return retflag;
     }
 }
@@ -5370,9 +5232,7 @@ pub fn swe_lun_occult_when_loc(
     var retflag = occult_when_loc(tjd_start, ipl, starname, ifl, geopos, tret, attr, backward, serr, swed, models, dctx, cctx);
     if (retflag <= 0)
         return retflag;
-    //
     // diameter of core shadow
-    //
     var geopos2: [2]f64 = undefined;
     var dcore: [10]f64 = undefined;
     const retflag2 = eclipse_where(tret[0], ipl, starname, ifl, &geopos2, &dcore, serr, swed, models, dctx, cctx);
@@ -5558,9 +5418,7 @@ fn lun_eclipse_how(
     dcore[2] = D0;
     dcore[3] = cosf1;
     dcore[4] = cosf2;
-    //
     // phase and umbral magnitude
-    //
     retc = 0;
     if (d0 / 2 >= r0 + rmoon / cosf1) {
         retc = SE_ECL_TOTAL;
@@ -5578,9 +5436,7 @@ fn lun_eclipse_how(
         }
     }
     if (attr != null) attr.?[8] = attr.?[0];
-    //
     // penumbral magnitude
-    //
     if (attr != null) {
         attr.?[1] = (D0 / 2 - r0 + rmoon) / dmoon;
         if (retc != 0)
@@ -5644,9 +5500,7 @@ pub fn swe_lun_eclipse_how(
     if (geopos == null) {
         return retc;
     }
-    //
     // azimuth and altitude of moon
-    //
     sweph.swe_set_topo(geopos.?[0], geopos.?[1], geopos.?[2], swed);
     if (sweph.swe_calc_ut(tjd_ut, SE_MOON, ifl | sweph.SEFLG_TOPOCTR | sweph.SEFLG_EQUATORIAL, &lm, swed, models, dctx, serr) == lib.ERR)
         return lib.ERR;
@@ -5790,11 +5644,9 @@ pub fn swe_lun_eclipse_when(
             0.0002 * E * swe_shim_sin(M - 2 * F1) -
             0.0002 * E * swe_shim_sin(2 * Mm - M) -
             0.0002 * swe_shim_sin(Om);
-        //
         // precise computation:
         // time of maximum eclipse (if eclipse) =
         // minimum selenocentric angle between sun and earth edges.
-        //
         dtstart = 0.1;
         if (tjd < 2100000 or tjd > 2500000) // was tjd < 2000000 until 26-aug-22
             dtstart = 5;
@@ -5856,9 +5708,7 @@ pub fn swe_lun_eclipse_when(
             K += @floatFromInt(direction);
             continue;
         }
-        //
         // check whether or not eclipse type found is wanted
-        //
         // non penumbral eclipse is wanted:
         if ((ifltype & SE_ECL_PENUMBRAL) == 0 and (retflag & SE_ECL_PENUMBRAL) != 0) {
             K += @floatFromInt(direction);
@@ -5874,11 +5724,9 @@ pub fn swe_lun_eclipse_when(
             K += @floatFromInt(direction);
             continue;
         }
-        //
         // n = 0: times of eclipse begin and end
         // n = 1: times of totality begin and end
         // n = 2: times of center line begin and end
-        //
         var o: i32 = undefined;
         if ((retflag & SE_ECL_PENUMBRAL) != 0)
             o = 0
@@ -5990,9 +5838,7 @@ pub fn swe_lun_eclipse_when_loc(
         if (retflag == lib.ERR) {
             return lib.ERR;
         }
-        //
         // visibility of eclipse phases
-        //
         var retflag_out: i32 = 0;
         var i: i32 = 7;
         while (i >= 0) : (i -= 1) {

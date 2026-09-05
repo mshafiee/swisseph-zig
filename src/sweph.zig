@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Mohammad Shafiee — Zig port of Swiss Ephemeris
-// Swiss Ephemeris Zig port --- sweph module (swe_calc orchestration).
-// Translated 1:1 from sweph.c to preserve exact floating-point operation
-// order, differential-tested against the C oracle.
-//
-// Scope of this phase: the SEFLG_MOSEPH pipeline for SUN, MOON, EMB/Earth,
-// Mercury..Pluto, MEAN_NODE, MEAN_APOG (swe_calc_ut / swe_calc), with flag
-// combos SPEED/SPEED3/EQUATORIAL/XYZ/RADIANS/J2000/NONUT/TRUEPOS/NOABERR/
-// NOGDEFL/HELCTR/BARYCTR/ICRS. Excluded (deferred): SWIEPH/JPL ephemeris
-// file machinery, sidereal mode, topocentric mode, planetary center of
-// body, TRUE_NODE/OSCU_APOG (lunar_osc_elem), fixstars.
-// The `swed` global is modeled as an explicit Swed struct owned by the
-// caller; AstroModels/DeltatCtx thread the remaining global state.
+// Swiss Ephemeris Zig port — sweph module (swe_calc orchestration).
+// Port of sweph.c; see docs/parity.md for the bit-parity contract.
+// The C `swed` global is an explicit `Swed` struct; see docs/api.md.
 const std = @import("std");
 const lib = @import("swephlib");
 const deltat = @import("deltat");
@@ -431,7 +422,7 @@ fn fgets(buf: [*]u8, size: i32, stream: ?*anyopaque) ?[*:0]u8 {
 
 /// Model of sweph.c's `struct swe_data` for the ported subset.
 pub const Swed = struct {
-    // Moshier moon workspace + pdp_* cache (was swemmoon file statics; TLS in C)
+    // Moshier moon workspace + pdp_* cache (was swemmoon file statics)
     moon_ws: @import("swemmoon").MoonWs = .{},
     pldat: [SE_NPLANETS]PlanData = [_]PlanData{.{}} ** SE_NPLANETS,
     nddat: [SEI_NNDAT]PlanData = [_]PlanData{.{}} ** SEI_NNDAT,
@@ -454,7 +445,7 @@ pub const Swed = struct {
     deps: [SWE_DATA_DPSI_DEPS]f64 = [_]f64{0} ** SWE_DATA_DPSI_DEPS,
     fidat: [SEI_NEPHFILES]FileData = [_]FileData{.{}} ** SEI_NEPHFILES,
     gcdat: GcData = .{},
-    // Moshier planet sin/cos workspace (was swemplan file statics; TLS in C)
+    // Moshier planet sin/cos workspace (was swemplan file statics)
     plan_ws: @import("swemplan").PlanWs = .{},
     // JPL ephemeris file handle + interp/state statics (were swejpl file statics)
     jpl: @import("swejpl").JplCtx = .{},
@@ -4045,10 +4036,8 @@ fn lunar_osc_elem(tjd: f64, ipl_nd: usize, iflag_in: i32, swed: *Swed, models: A
     return OK;
 }
 
-// ---------------------------------------------------------------------------
 // SWIEPH file machinery (sweph.c read_const / do_fread / get_new_segment /
 // rot_back / sweplan / sweph / swi_fopen / swe_set_ephe_path)
-// ---------------------------------------------------------------------------
 
 const c_allocator = if (is_wasm) std.heap.page_allocator else std.heap.c_allocator;
 
@@ -6001,7 +5990,7 @@ fn jplplan(tjd: f64, ipli: usize, iflag: i32, do_save: bool, xpret: ?[]f64, xper
     const pdp = &swed.pldat[ipli];
     const pedp = &swed.pldat[SEI_EARTH];
     const psdp = &swed.pldat[SEI_SUNBARY];
-    _ = iflag; // currently not used, but this stops compiler warning
+    _ = iflag; // unused
     // we assume Teph ~= TDB ~= TT.
     var xp: []f64 = undefined;
     var xpe: []f64 = undefined;
