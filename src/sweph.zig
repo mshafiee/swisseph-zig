@@ -458,6 +458,14 @@ pub const Swed = struct {
     plan_ws: @import("swemplan").PlanWs = .{},
     // JPL ephemeris file handle + interp/state statics (were swejpl file statics)
     jpl: @import("swejpl").JplCtx = .{},
+    // fixed-star machinery (were sweph.c file statics); fixstar_buf is the
+    // backing store of fixed_stars (freed by SweState.deinit in the ABI layer)
+    fixstar_buf: []FixedStar = &[_]FixedStar{},
+    fs_alloc: std.mem.Allocator = std.heap.page_allocator,
+    fixstar_last_stardata: FixedStar = .{},
+    fixstar_slast_starname: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH,
+    fixstar_slast_record: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH,
+    fixstar_slast_starname_old: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH,
     ephepath: [AS_MAXCH]u8 = blk: {
         // swi_init_swed_if_start(): strcpy(swed.ephepath, SE_EPHE_PATH)
         var buf: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;
@@ -5395,6 +5403,9 @@ fn fixstarCutString(srecord_in: []const u8, star: ?[]u8, stardata: *FixedStar, s
     const slen = @min(srecord_in.len, s.len - 1);
     @memcpy(s[0..slen], srecord_in[0..slen]);
     s[slen] = 0;
+    // cpos_buf was a file static in the C port but has a single use here;
+    // it is single-call scratch, so a local preserves the semantics.
+    var cpos_buf: [20][AS_MAXCH]u8 = [_][AS_MAXCH]u8{[_]u8{0} ** AS_MAXCH} ** 20;
     var cpos: [20][]u8 = undefined;
     for (0..20) |ci| cpos[ci] = cpos_buf[ci][0..];
     const i = lib.swi_cutstr(s[0..slen], ",", cpos[0..].ptr, 20);
@@ -5500,7 +5511,6 @@ fn fixstarCutString(srecord_in: []const u8, star: ?[]u8, stardata: *FixedStar, s
     return OK;
 }
 
-threadlocal var cpos_buf: [20][AS_MAXCH]u8 = [_][AS_MAXCH]u8{[_]u8{0} ** AS_MAXCH} ** 20;
 threadlocal var fs_alloc = std.heap.page_allocator;
 
 /// sweph.c save_star_in_struct (realloc pattern -> grow the slice)
@@ -5516,10 +5526,10 @@ fn saveStarInStruct(nrecs: usize, fstp: *const FixedStar, swed: *Swed, serr: ?[]
             }
             return ERR;
         };
-        fixstar_alloc_buf = newbuf;
+        swed.fixstar_buf = newbuf;
     }
-    fixstar_alloc_buf[nrecs - 1] = fstp.*;
-    swed.fixed_stars = fixstar_alloc_buf[0..nrecs];
+    swed.fixstar_buf[nrecs - 1] = fstp.*;
+    swed.fixed_stars = swed.fixstar_buf[0..nrecs];
     return OK;
 }
 
@@ -6416,8 +6426,8 @@ pub fn swe_fixstar2(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swe
     }
     const sstar_z = std.mem.sliceTo(&sstar, 0);
     // star elements from last call:
-    if (swed.n_fixstars_records > 0 and std.mem.eql(u8, std.mem.sliceTo(&fixstar_slast_starname, 0), sstar_z)) {
-        stardata = fixstar_last_stardata;
+    if (swed.n_fixstars_records > 0 and std.mem.eql(u8, std.mem.sliceTo(&swed.fixstar_slast_starname, 0), sstar_z)) {
+        stardata = swed.fixstar_last_stardata;
         // found:
     } else {
         if (getBuiltinStar(star, &sstar, &srecord)) {
@@ -6435,10 +6445,10 @@ pub fn swe_fixstar2(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swe
         }
     }
     // found:
-    fixstar_last_stardata = stardata;
-    const sl = @min(sstar_z.len, fixstar_slast_starname.len - 1);
-    @memcpy(fixstar_slast_starname[0..sl], sstar[0..sl]);
-    fixstar_slast_starname[sl] = 0;
+    swed.fixstar_last_stardata = stardata;
+    const sl = @min(sstar_z.len, swed.fixstar_slast_starname.len - 1);
+    @memcpy(swed.fixstar_slast_starname[0..sl], sstar[0..sl]);
+    swed.fixstar_slast_starname[sl] = 0;
     retc = fixstarCalcFromStruct(&stardata, tjd, iflag, star, xx, swed, models, dctx, serr);
     if (retc == ERR) {
         for (0..6) |i| xx[i] = 0;
@@ -6490,8 +6500,8 @@ pub fn swe_fixstar2_mag(star: []u8, mag: *f64, swed: *Swed, serr: ?[]u8) i32 {
         return retc;
     }
     const sstar_z = std.mem.sliceTo(&sstar, 0);
-    if (swed.n_fixstars_records > 0 and std.mem.eql(u8, std.mem.sliceTo(&fixstar_slast_starname, 0), sstar_z)) {
-        stardata = fixstar_last_stardata;
+    if (swed.n_fixstars_records > 0 and std.mem.eql(u8, std.mem.sliceTo(&swed.fixstar_slast_starname, 0), sstar_z)) {
+        stardata = swed.fixstar_last_stardata;
     } else {
         retc = searchStarInList(sstar[0 .. sstar_z.len + 1], &stardata, swed, serr);
         if (retc == ERR) {
@@ -6499,10 +6509,10 @@ pub fn swe_fixstar2_mag(star: []u8, mag: *f64, swed: *Swed, serr: ?[]u8) i32 {
             return retc;
         }
     }
-    fixstar_last_stardata = stardata;
-    const sl = @min(sstar_z.len, fixstar_slast_starname.len - 1);
-    @memcpy(fixstar_slast_starname[0..sl], sstar[0..sl]);
-    fixstar_slast_starname[sl] = 0;
+    swed.fixstar_last_stardata = stardata;
+    const sl = @min(sstar_z.len, swed.fixstar_slast_starname.len - 1);
+    @memcpy(swed.fixstar_slast_starname[0..sl], sstar[0..sl]);
+    swed.fixstar_slast_starname[sl] = 0;
     mag.* = stardata.mag;
     // star name output
     {
@@ -6676,9 +6686,9 @@ pub fn swe_fixstar(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed
         }
     }
     // star elements from last call:
-    if (fixstar_slast_record[0] != 0 and std.mem.eql(u8, std.mem.sliceTo(&fixstar_slast_starname_old, 0), sstar_z)) {
-        const rlen = std.mem.indexOfScalar(u8, &fixstar_slast_record, 0) orelse fixstar_slast_record.len;
-        @memcpy(srecord[0..rlen], fixstar_slast_record[0..rlen]);
+    if (swed.fixstar_slast_record[0] != 0 and std.mem.eql(u8, std.mem.sliceTo(&swed.fixstar_slast_starname_old, 0), sstar_z)) {
+        const rlen = std.mem.indexOfScalar(u8, &swed.fixstar_slast_record, 0) orelse swed.fixstar_slast_record.len;
+        @memcpy(srecord[0..rlen], swed.fixstar_slast_record[0..rlen]);
         srecord[rlen] = 0;
     } else {
         if (getBuiltinStar(star, &sstar, &srecord)) {
@@ -6693,11 +6703,11 @@ pub fn swe_fixstar(star: []u8, tjd: f64, iflag_in: i32, xx: *[6]f64, swed: *Swed
     }
     // found:
     const rlen2 = std.mem.indexOfScalar(u8, &srecord, 0) orelse srecord.len;
-    @memcpy(fixstar_slast_record[0..rlen2], srecord[0..rlen2]);
-    fixstar_slast_record[rlen2] = 0;
-    const sl2 = @min(sstar_z.len, fixstar_slast_starname_old.len - 1);
-    @memcpy(fixstar_slast_starname_old[0..sl2], sstar[0..sl2]);
-    fixstar_slast_starname_old[sl2] = 0;
+    @memcpy(swed.fixstar_slast_record[0..rlen2], srecord[0..rlen2]);
+    swed.fixstar_slast_record[rlen2] = 0;
+    const sl2 = @min(sstar_z.len, swed.fixstar_slast_starname_old.len - 1);
+    @memcpy(swed.fixstar_slast_starname_old[0..sl2], sstar[0..sl2]);
+    swed.fixstar_slast_starname_old[sl2] = 0;
     retc = swiFixstarCalcFromRecord(srecord[0 .. (std.mem.indexOfScalar(u8, &srecord, 0) orelse srecord.len - 1) + 1], tjd, iflag, star, xx, swed, models, dctx, serr);
     if (retc == ERR) {
         for (0..6) |i| xx[i] = 0;
@@ -6758,9 +6768,9 @@ pub fn swe_fixstar_mag(star: []u8, mag: *f64, swed: *Swed, serr: ?[]u8) i32 {
         }
     }
     // star elements from last call:
-    if (fixstar_slast_record[0] != 0 and std.mem.eql(u8, std.mem.sliceTo(&fixstar_slast_starname_old, 0), sstar_z)) {
-        const rlen = std.mem.indexOfScalar(u8, &fixstar_slast_record, 0) orelse fixstar_slast_record.len;
-        @memcpy(srecord[0..rlen], fixstar_slast_record[0..rlen]);
+    if (swed.fixstar_slast_record[0] != 0 and std.mem.eql(u8, std.mem.sliceTo(&swed.fixstar_slast_starname_old, 0), sstar_z)) {
+        const rlen = std.mem.indexOfScalar(u8, &swed.fixstar_slast_record, 0) orelse swed.fixstar_slast_record.len;
+        @memcpy(srecord[0..rlen], swed.fixstar_slast_record[0..rlen]);
         srecord[rlen] = 0;
     } else {
         if (getBuiltinStar(star, &sstar, &srecord)) {
@@ -6775,11 +6785,11 @@ pub fn swe_fixstar_mag(star: []u8, mag: *f64, swed: *Swed, serr: ?[]u8) i32 {
     }
     // found:
     const rlen2 = std.mem.indexOfScalar(u8, &srecord, 0) orelse srecord.len;
-    @memcpy(fixstar_slast_record[0..rlen2], srecord[0..rlen2]);
-    fixstar_slast_record[rlen2] = 0;
-    const sl2 = @min(sstar_z.len, fixstar_slast_starname_old.len - 1);
-    @memcpy(fixstar_slast_starname_old[0..sl2], sstar[0..sl2]);
-    fixstar_slast_starname_old[sl2] = 0;
+    @memcpy(swed.fixstar_slast_record[0..rlen2], srecord[0..rlen2]);
+    swed.fixstar_slast_record[rlen2] = 0;
+    const sl2 = @min(sstar_z.len, swed.fixstar_slast_starname_old.len - 1);
+    @memcpy(swed.fixstar_slast_starname_old[0..sl2], sstar[0..sl2]);
+    swed.fixstar_slast_starname_old[sl2] = 0;
     var stardata: FixedStar = .{};
     retc = fixstarCutString(srecord[0 .. (std.mem.indexOfScalar(u8, &srecord, 0) orelse srecord.len - 1) + 1], star, &stardata, serr, swed);
     if (retc == ERR) {
