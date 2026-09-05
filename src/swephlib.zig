@@ -2896,11 +2896,14 @@ fn cutlistContains(cutlist: []const u8, c: u8) bool {
     return false;
 }
 
-threadlocal var crc32_table: [256]u32 = [_]u32{0} ** 256;
-threadlocal var crc32_table_done: bool = false;
 const CRC32_POLY: u32 = 0x04c11db7; // AUTODIN II, Ethernet, & FDDI
 
-fn init_crc32() void {
+// Standard CRC-32 table, generated at comptime with the exact expansion the
+// C runtime init used (poly 0x04c11db7, MSB-first). Removes the lazy-init
+// static (and its race) by construction; values are identical.
+const crc32_table: [256]u32 = blk: {
+    @setEvalBranchQuota(10000);
+    var table: [256]u32 = undefined;
     var i: u32 = 0;
     while (i < 256) : (i += 1) {
         var c: u32 = i << 24;
@@ -2911,16 +2914,13 @@ fn init_crc32() void {
             else
                 c = (c << 1);
         }
-        crc32_table[i] = c;
+        table[i] = c;
     }
-}
+    break :blk table;
+};
 
 /// swephlib.c swi_crc32
 pub fn swi_crc32(buf: []const u8) u32 {
-    if (!crc32_table_done) {
-        init_crc32();
-        crc32_table_done = true;
-    }
     var crc: u32 = 0xffffffff;
     for (buf) |b| {
         crc = (crc << 8) ^ crc32_table[(crc >> 24) ^ b];
