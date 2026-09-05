@@ -123,13 +123,11 @@ fn setSerr(buf: *[256]u8, msg: []const u8) void {
 }
 
 fn serrFailed(buf: *[256]u8, hsys: i32) void {
-    const s = std.fmt.bufPrintZ(buf, "swe_house_pos(): failed for system {c}", .{@as(u8, @truncate(@as(u32, @bitCast(hsys))))}) catch return;
-    _ = s;
+    _ = std.fmt.bufPrintZ(buf, "swe_house_pos(): failed for system {c}", .{@as(u8, @truncate(@as(u32, @bitCast(hsys))))}) catch return;
 }
 
 fn serrSimplified(buf: *[256]u8, hsys: i32) void {
-    const s = std.fmt.bufPrintZ(buf, "swe_house_pos(): using simplified algorithm for system {c}\n", .{@as(u8, @truncate(@as(u32, @bitCast(hsys))))}) catch return;
-    _ = s;
+    _ = std.fmt.bufPrintZ(buf, "swe_house_pos(): using simplified algorithm for system {c}\n", .{@as(u8, @truncate(@as(u32, @bitCast(hsys))))}) catch return;
 }
 
 fn Asc1(x1_in: f64, f: f64, sine: f64, cose: f64) f64 {
@@ -445,8 +443,7 @@ fn sunshine_solution_treindl(ramc: f64, lat: f64, ecl: f64, hsp: *Houses) i32 {
         c = acosd(cosc);
         if (c < 1e-6) {
             // C: sprintf(hsp->serr, "Sunshine house %d c=%le very small", ih, c)
-            const s = std.fmt.bufPrintZ(&hsp.serr, "Sunshine house {d} c={e} very small", .{ ih, c }) catch return ERR;
-            _ = s;
+            _ = std.fmt.bufPrintZ(&hsp.serr, "Sunshine house {d} c={e} very small", .{ ih, c }) catch return ERR;
             retval = ERR;
         }
         sinzd = sind(xhs) * sind(alpha2) / sind(c);

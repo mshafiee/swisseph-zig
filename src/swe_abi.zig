@@ -959,8 +959,7 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
     {
         var xx_tmp: [6]f64 = undefined;
         const dt0 = abiDelta(tjd, epheflag);
-        const ret0 = sweph.swe_calc(tjd + dt0, -1, iflag, &xx_tmp, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
-        _ = ret0;
+        _ = sweph.swe_calc(tjd + dt0, -1, iflag, &xx_tmp, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     }
     iflag &= ~(sweph.SEFLG_HELCTR | sweph.SEFLG_BARYCTR);
     var iflag2: i32 = epheflag;

@@ -1318,14 +1318,7 @@ fn parseArgsWithC(argc: c_int, argv: [*][*:0]u8) !void {
         const cstr2: [*:0]u8 = @ptrCast(&ctmp);
         // find colons
         if (strchr(cstr2, ':') != null) {
-            // parse like C: if colon, split
-            var ih: i32 = 0;
-            var im: i32 = 0;
-            var ds: f64 = 0;
-            _ = &ih;
-            _ = &im;
-            _ = &ds;
-            // Use Zig parsing
+            // parse like C: if colon, split (Zig parsing below)
             const s = zigStrFromC(cstr2);
             var parts = std.mem.splitScalar(u8, s, ':');
             var idxp: usize = 0;
@@ -1610,8 +1603,7 @@ pub fn main(init: std.process.Init) !void {
                     _ = printf("     delta t: %f sec", delt * 86400);
                 }
             }
-            const iflgret_tmp: i32 = swe.swe_calc(te, -1, iflag, @ptrCast(&xobl), @ptrCast(&serr));
-            _ = iflgret_tmp;
+            _ = swe.swe_calc(te, -1, iflag, @ptrCast(&xobl), @ptrCast(&serr));
             if (with_header) {
                 _ = printf("\nTT:  %.9f", te);
                 if ((iflag & SEFLG_SIDEREAL) != 0) {

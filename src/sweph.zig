@@ -2517,11 +2517,9 @@ fn app_pos_etc_moon(iflag: i32, swed: *Swed, models: AstroModels, dctx: *DeltatC
     var xe: [6]f64 = undefined;
     var xobs2: [6]f64 = undefined;
     var dt: f64 = undefined;
-    const psdp = &swed.pldat[SEI_SUNBARY];
     const pdp = &swed.pldat[SEI_MOON];
     var oe: *const Eps = &swed.oec;
     var t: f64 = 0;
-    _ = psdp;
     // if the same conversions have already been done for the same date, return
     const flg1 = iflag & ~SEFLG_EQUATORIAL & ~SEFLG_XYZ;
     const flg2 = pdp.xflgs & ~SEFLG_EQUATORIAL & ~SEFLG_XYZ;
@@ -3097,7 +3095,6 @@ fn swecalc(tjd: f64, ipl: i32, iplmoon: i32, iflag_in: i32, x: *[24]f64, swed: *
             ipli_ast = @intCast(ipli_u);
         }
         const pdp_ast = &swed.pldat[ipli_u];
-        const xp_ast = &pdp_ast.xreturn;
         var ifno: usize = undefined;
         if (ipli_ast > SE_AST_OFFSET or ipli_ast > SE_PLMOON_OFFSET) {
             ifno = SEI_FILE_ANY_AST;
@@ -3179,7 +3176,6 @@ fn swecalc(tjd: f64, ipl: i32, iplmoon: i32, iflag_in: i32, x: *[24]f64, swed: *
         }
         copy_xreturn(pdp_ast, x);
         // xp (C's pdp->xreturn) was already copied by the caller's copy loop
-        _ = xp_ast;
     } else if (ipl >= swemplan_mod.SE_FICT_OFFSET and ipl <= swemplan_mod.SE_FICT_MAX) {
         // sweph.c fictitious planets (Isis-Transpluto, Uranian planets)
         ipli = SEI_ANYBODY;
@@ -4187,8 +4183,7 @@ fn read_const(ifno: usize, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: 
     }
     if (!std.mem.eql(u8, s2low, line)) {
         if (serr) |sr| {
-            const msg = std.fmt.bufPrint(sr[0 .. sr.len - 1], "Ephemeris file name '{s}' wrong; rename '{s}' ", .{ s2low, line }) catch "";
-            _ = msg;
+            _ = std.fmt.bufPrint(sr[0 .. sr.len - 1], "Ephemeris file name '{s}' wrong; rename '{s}' ", .{ s2low, line }) catch "";
         }
         return returnErrorFile(serr, swed, ifno);
     }
@@ -4458,11 +4453,8 @@ fn fileDamage(serr: ?[]u8, swed: *Swed, ifno: usize, smsg: []const u8) i32 {
     if (serr) |sr| {
         sr[0] = 0;
         const fnam = std.mem.sliceTo(&swed.fidat[ifno].fnam, 0);
-        const msg = "Ephemeris file %s is damaged (0%s). ";
-        _ = msg;
         // C: sprintf(serr, "Ephemeris file %s is damaged (0%s). ", fnam, smsg)
-        const out = std.fmt.bufPrint(sr[0 .. sr.len - 1], "Ephemeris file {s} is damaged (0{s}). ", .{ fnam, smsg }) catch "";
-        _ = out;
+        _ = std.fmt.bufPrint(sr[0 .. sr.len - 1], "Ephemeris file {s} is damaged (0{s}). ", .{ fnam, smsg }) catch "";
     }
     return returnErrorFile(serr, swed, ifno);
 }
@@ -5320,8 +5312,6 @@ fn sliceToZ(buf: *[AS_MAXCH]u8) [:0]const u8 {
 fn atoiSlice(tok: []const u8) i32 {
     var t = tok;
     while (t.len > 0 and (t[0] == ' ' or t[0] == '\t')) : (t = t[1..]) {}
-    const end = std.mem.indexOfScalar(u8, t, '-') orelse t.len;
-    _ = end;
     var v: i32 = 0;
     var i: usize = 0;
     var neg = false;

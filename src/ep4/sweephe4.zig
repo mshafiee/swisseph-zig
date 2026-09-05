@@ -241,10 +241,7 @@ fn errCat(errtext: ?[*:0]u8, msg: []const u8) void {
 
 fn my_makepath(d: [*]u8, s: [*:0]const u8) [*:0]u8 {
     const span = std.mem.span(s);
-    const is_abs = span.len > 0 and (span[0] == '/' or span[0] == DIR_GLUE or std.mem.indexOfScalar(u8, span, ':') != null);
     // Original C only strcpy when absolute; for functional behavior we strcpy in both cases.
-    // Preserve logic: if absolute, copy; else also copy (otherwise d would be uninitialized).
-    _ = is_abs;
     var i: usize = 0;
     while (i < span.len) : (i += 1) d[i] = span[i];
     d[span.len] = 0;
@@ -418,13 +415,12 @@ pub fn eph4_posit(jlong: i32, writeflag: i32, errtext: ?[*:0]u8) callconv(.c) i3
 
         ephfp = fopen(fname_c, mode_c);
         if (ephfp == null) {
-            if (errtext) |et| {
+            if (errtext != null) {
                 if (writeflag == 0) {
                     errSet(errtext, "eph4_posit: file {s} does not exist\n", .{std.mem.span(s_c)});
                 } else {
                     errSet(errtext, "eph4_posit: could not create file {s}\n", .{std.mem.span(s_c)});
                 }
-                _ = et;
             }
             return ERR;
         }

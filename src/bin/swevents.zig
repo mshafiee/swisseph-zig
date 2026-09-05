@@ -422,11 +422,6 @@ fn printItem(s_in: [*:0]u8, teph_in: f64, dpos: f64, delon: f64, dmag: f64) void
     // cycle logic simplified: always started if do_flag != DO_ALL
     var cycle_started: bool = true;
     if (do_flag == DO_ALL) {
-        const isConj = std.mem.startsWith(u8, std.mem.span(s), "superior") or (ipl_global > SE_VENUS and std.mem.startsWith(u8, std.mem.span(s), "conj"));
-        // track static via global
-        // use a static stored in function attribute via global variable
-        // we use a file-scope var cycle_has_started2
-        _ = isConj;
         // for simplicity, if DO_ALL, always consider started after first conj/superior, but we just always print to avoid missing events
         cycle_started = true;
     }
@@ -769,16 +764,10 @@ pub fn main(init: std.process.Init) !void {
     var sp: ?[]const u8 = begindate;
     // if begindate null, ask interactively? For non-interactive just require -b; fallback to stdin like C but we simplify to error
     if (sp == null) {
-        // try interactive read from stdin
+        // Non-interactive fallback: use J2000.0 when no -b date is given.
         _ = printf("datum ?");
-        const inbuf: [512]u8 = [_]u8{0} ** 512;
-        const f = @as(?*anyopaque, @ptrFromInt(0)); // stdin placeholder, use c fgets via fdopen? Simplify: use std io
-        _ = f;
-        // fallback: use today? just use current tjd as now via swe_julday of today using system time
-        // Use std.time
         tjd = 2451545.0;
         sp = null;
-        _ = inbuf;
     } else {
         const sdate_str = sp.?;
         // copy to mutable s for parsing like C
@@ -893,8 +882,6 @@ pub fn main(init: std.process.Init) !void {
         iflgret = swe.swe_calc(te, iplfrom, iflag, @ptrCast(&xh2), @ptrCast(&serr));
         iflgret = swe.swe_calc(te, iplfrom, iflag | SEFLG_EQUATORIAL, @ptrCast(&xd2), @ptrCast(&serr));
         iflgret = swe.swe_calc(te, SE_ECL_NUT, 0, @ptrCast(&x), @ptrCast(&serr));
-        const epstrue: f64 = x[0];
-        _ = epstrue;
         // elongation
         for (0..6) |ii| xel2[ii] = xp2[ii] - xs2[ii];
         xel2[0] = swe.swe_radnorm(xel2[0]);

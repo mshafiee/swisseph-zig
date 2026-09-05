@@ -435,7 +435,6 @@ pub fn swe_pheno(
     var dt: f64 = 0;
     var dd: f64 = undefined;
     var serr2: [256]u8 = [_]u8{0} ** 256; // AS_MAXCH
-    var i: usize = 0;
     iflag &= ~(SEFLG_JPLHOR | SEFLG_JPLHOR_APPROX);
     // function calls for Pluto with asteroid number 134340
     // are treated as calls for Pluto as main body SE_PLUTO
@@ -673,7 +672,6 @@ pub fn swe_pheno(
         const n = @min(src.len, serr.?.len);
         @memcpy(serr.?[0..n], src[0..n]);
     }
-    _ = &i;
     return iflag;
 }
 
@@ -1114,8 +1112,7 @@ pub fn swe_rise_trans_true_hor(
         if (calc_culm != 0) {
             dt = twohrs;
             tcu = t - dt;
-            const rfm = find_maximum(dc[0], dc[1], dc[2], dt, &dtint, &dx);
-            _ = rfm;
+            _ = find_maximum(dc[0], dc[1], dc[2], dt, &dtint, &dx);
             tcu += dtint + dt;
             dt /= 3;
             while (dt > 0.0001) : (dt /= 3) {
@@ -1138,8 +1135,7 @@ pub fn swe_rise_trans_true_hor(
                     ah[1] -= horhgt;
                     dc[iculm] = ah[1];
                 }
-                const rfm2 = find_maximum(dc[0], dc[1], dc[2], dt, &dtint, &dx);
-                _ = rfm2;
+                _ = find_maximum(dc[0], dc[1], dc[2], dt, &dtint, &dx);
                 tcu += dtint + dt;
             }
             nculm += 1;

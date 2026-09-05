@@ -1172,8 +1172,6 @@ pub fn swe_heliacal_pheno_ut(JDNDaysUT: f64, dgeo: *[3]f64, datm: *[4]f64, dobs:
     var ARCLact: f64 = undefined;
     var kact: f64 = undefined;
     var WMoon: f64 = undefined;
-    const LMoon_init: f64 = 0;
-    _ = LMoon_init;
     var LMoon: f64 = 0;
     var qYal: f64 = undefined;
     var qCrit: f64 = undefined;
