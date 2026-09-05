@@ -454,6 +454,8 @@ pub const Swed = struct {
     deps: [SWE_DATA_DPSI_DEPS]f64 = [_]f64{0} ** SWE_DATA_DPSI_DEPS,
     fidat: [SEI_NEPHFILES]FileData = [_]FileData{.{}} ** SEI_NEPHFILES,
     gcdat: GcData = .{},
+    // Moshier planet sin/cos workspace (was swemplan file statics; TLS in C)
+    plan_ws: @import("swemplan").PlanWs = .{},
     ephepath: [AS_MAXCH]u8 = blk: {
         // swi_init_swed_if_start(): strcpy(swed.ephepath, SE_EPHE_PATH)
         var buf: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH;

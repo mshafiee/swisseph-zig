@@ -101,8 +101,13 @@ pub const phases = [9]f64{
     860492.1546,
 };
 
-pub var ss: [9][24]f64 = undefined;
-pub var cc: [9][24]f64 = undefined;
+/// Moshier sin/cos multiple-angle workspace (was C file statics ss/cc;
+/// TLS there). Lives in Swed so each instance has its own; sscc() fills
+/// it and swi_moshplan2() reads it within the same call chain.
+pub const PlanWs = struct {
+    ss: [9][24]f64 = undefined,
+    cc: [9][24]f64 = undefined,
+};
 
 // swed.pldat[] equivalent (only fields swi_moshplan touches; planets 0..9)
 
@@ -2149,7 +2154,7 @@ pub const planets = [9]*const Plantbl{ &mer404, &ven404, &ear404, &mar404, &jup4
 
 /// Moshier planetary theory core (swemplan.c swi_moshplan2):
 /// heliocentric cartesian-of-equinox-2000 polar coordinates for planet iplm.
-pub fn swi_moshplan2(J: f64, iplm: usize, pobj: *[3]f64) i32 {
+pub fn swi_moshplan2(J: f64, iplm: usize, pobj: *[3]f64, swed: *sweph.Swed) i32 {
     const plan = planets[iplm];
     var su: f64 = undefined;
     var cu: f64 = undefined;
@@ -2162,7 +2167,7 @@ pub fn swi_moshplan2(J: f64, iplm: usize, pobj: *[3]f64) i32 {
         const j: i32 = plan.max_harmonic[i];
         if (j > 0) {
             const sr = (mods3600(freqs[i] * T) + phases[i]) * STR;
-            sscc(i, sr, @intCast(j));
+            sscc(i, sr, @intCast(j), &swed.plan_ws);
         }
     }
     // Point to start of table of arguments.
@@ -2237,10 +2242,10 @@ pub fn swi_moshplan2(J: f64, iplm: usize, pobj: *[3]f64) i32 {
                 if (j < 0)
                     k = -k;
                 k -= 1;
-                su = ss[m][@intCast(k)]; // sin(k*angle)
+                su = swed.plan_ws.ss[m][@intCast(k)]; // sin(k*angle)
                 if (j < 0)
                     su = -su;
-                cu = cc[m][@intCast(k)];
+                cu = swed.plan_ws.cc[m][@intCast(k)];
                 if (k1 == 0) {
                     // set first angle
                     sv = su;
@@ -2340,7 +2345,7 @@ pub fn swi_moshplan(tjd: f64, ipli: usize, do_save: bool, xpret: ?*[6]f64, xeret
             xe = &swed.pldat[SEI_EARTH].x;
         } else {
             // emb
-            _ = swi_moshplan2(tjd, pnoint2msh[SEI_EMB], xe[0..3]); // emb hel. ecl. 2000 polar
+            _ = swi_moshplan2(tjd, pnoint2msh[SEI_EMB], xe[0..3], swed); // emb hel. ecl. 2000 polar
             lib.swi_polcart(xe[0..3], xe[0..3]); // to cartesian
             lib.swi_coortrf2(xe[0..3], xe[0..3], -seps2000, ceps2000); // and equator 2000
             embofs_mosh(tjd, xe, oec, models); // emb -> earth
@@ -2350,7 +2355,7 @@ pub fn swi_moshplan(tjd: f64, ipli: usize, do_save: bool, xpret: ?*[6]f64, xeret
                 swed.pldat[SEI_EARTH].iephe = SEFLG_MOSEPH;
             }
             // one more position for speed.
-            _ = swi_moshplan2(tjd - PLAN_SPEED_INTV, pnoint2msh[SEI_EMB], x2[0..3]);
+            _ = swi_moshplan2(tjd - PLAN_SPEED_INTV, pnoint2msh[SEI_EMB], x2[0..3], swed);
             lib.swi_polcart(&x2, &x2);
             lib.swi_coortrf2(&x2, &x2, -seps2000, ceps2000);
             embofs_mosh(tjd - PLAN_SPEED_INTV, &x2, oec, models);
@@ -2378,7 +2383,7 @@ pub fn swi_moshplan(tjd: f64, ipli: usize, do_save: bool, xpret: ?*[6]f64, xeret
         if (tjd == swed.pldat[ipli].teval and swed.pldat[ipli].iephe == SEFLG_MOSEPH) {
             xp = &swed.pldat[ipli].x;
         } else {
-            _ = swi_moshplan2(tjd, iplm, xp[0..3]);
+            _ = swi_moshplan2(tjd, iplm, xp[0..3], swed);
             lib.swi_polcart(xp[0..3], xp[0..3]);
             lib.swi_coortrf2(xp[0..3], xp[0..3], -seps2000, ceps2000);
             if (do_save) {
@@ -2389,7 +2394,7 @@ pub fn swi_moshplan(tjd: f64, ipli: usize, do_save: bool, xpret: ?*[6]f64, xeret
             // one more position for speed.
             // the following dt gives good speed for light-time correction
             const dt = PLAN_SPEED_INTV;
-            _ = swi_moshplan2(tjd - dt, iplm, x2[0..3]);
+            _ = swi_moshplan2(tjd - dt, iplm, x2[0..3], swed);
             lib.swi_polcart(&x2, &x2);
             lib.swi_coortrf2(&x2, &x2, -seps2000, ceps2000);
             var i: usize = 0;
@@ -2412,22 +2417,22 @@ pub fn swi_moshplan(tjd: f64, ipli: usize, do_save: bool, xpret: ?*[6]f64, xeret
 
 /// Prepare lookup table of sin and cos ( i*Lj ) for required multiple
 /// angles (swemplan.c sscc)
-pub fn sscc(k: usize, arg: f64, n: usize) void {
+pub fn sscc(k: usize, arg: f64, n: usize, ws: *PlanWs) void {
     const su = swe_shim_sin(arg);
     const cu = swe_shim_cos(arg);
-    ss[k][0] = su; // sin(L)
-    cc[k][0] = cu; // cos(L)
+    ws.ss[k][0] = su; // sin(L)
+    ws.cc[k][0] = cu; // cos(L)
     var sv = 2.0 * su * cu;
     var cv = cu * cu - su * su;
-    ss[k][1] = sv; // sin(2L)
-    cc[k][1] = cv;
+    ws.ss[k][1] = sv; // sin(2L)
+    ws.cc[k][1] = cv;
     var i: usize = 2;
     while (i < n) : (i += 1) {
         const s = su * cv + cu * sv;
         cv = cu * cv - su * sv;
         sv = s;
-        ss[k][i] = sv; // sin( i+1 L )
-        cc[k][i] = cv;
+        ws.ss[k][i] = sv; // sin( i+1 L )
+        ws.cc[k][i] = cv;
     }
 }
 
