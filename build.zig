@@ -174,6 +174,25 @@ pub fn build(b: *std.Build) void {
         const ts_tests = b.addTest(.{ .root_module = ts_mod });
         test_step.dependOn(&b.addRunArtifact(ts_tests).step);
 
+        // Threaded smoke test: per-thread Swed isolation + ABI threadlocal
+        // SweState isolation (shim comes in via swe_abi).
+        const thr_mod = b.createModule(.{ .root_source_file = b.path("src/test_thread_safety.zig"), .target = target, .optimize = optimize });
+        thr_mod.addOptions("build_options", build_options);
+        thr_mod.addImport("sweph", sweph);
+        thr_mod.addImport("swephlib", swephlib);
+        thr_mod.addImport("deltat", deltat);
+        thr_mod.addImport("swedate", swedate);
+        thr_mod.addImport("swehouse", swehouse);
+        thr_mod.addImport("swecl", swecl);
+        thr_mod.addImport("swehel", swehel);
+        thr_mod.addImport("swemmoon", swemmoon);
+        thr_mod.addImport("swemplan", swemplan);
+        thr_mod.addImport("swejpl", swejpl);
+        thr_mod.addImport("swe_abi", swe_abi);
+        thr_mod.link_libc = true;
+        const thr_tests = b.addTest(.{ .root_module = thr_mod });
+        test_step.dependOn(&b.addRunArtifact(thr_tests).step);
+
         // zig-difftest: recomputes the 21 verification corpora bit-for-bit
         // (drives the swisseph-zig-verify harness; corpus files live there).
         const dt_mod = b.createModule(.{ .root_source_file = b.path("src/difftest.zig"), .target = target, .optimize = optimize });

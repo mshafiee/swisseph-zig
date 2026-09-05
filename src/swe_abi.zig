@@ -14,15 +14,29 @@ const DeltatCtx = deltat.DeltatCtx;
 const AstroModels = swephlib.AstroModels;
 const SweclCtx = swecl.SweclCtx;
 
-threadlocal var g_swed: Swed = .{};
-// Sunshine-house memo (swehouse.c saved_sundec); folded into the threadlocal
-// SweState in the next step — interim module var keeps C's process-global
-// semantics until then.
-var g_house: swehouse.HouseCtx = .{};
-threadlocal var g_models: AstroModels = .{};
-threadlocal var g_dctx: DeltatCtx = .{};
-threadlocal var g_swecl: SweclCtx = .{};
-threadlocal var g_swehel: swehel.SwehelCtx = .{};
+/// Per-thread C-API instance: the union of all state the ABI globals used
+/// to hold. Mirrors upstream C, whose globals are thread-local statics.
+pub const SweState = struct {
+    swed: Swed = .{},
+    house: swehouse.HouseCtx = .{},
+    models: AstroModels = .{},
+    dctx: DeltatCtx = .{},
+    cctx: SweclCtx = .{},
+    hctx: swehel.SwehelCtx = .{},
+
+    /// Frees heap-owned members (fixstar backing buffer). Safe to call on
+    /// a default/never-used state.
+    pub fn deinit(self: *SweState) void {
+        if (self.swed.fixstar_buf.len > 0) {
+            self.swed.fs_alloc.free(self.swed.fixstar_buf);
+            self.swed.fixstar_buf = &[_]sweph.FixedStar{};
+            self.swed.fixed_stars = &[_]sweph.FixedStar{};
+        }
+    }
+};
+
+// One isolated C-API instance per OS thread (mirrors C TLS statics).
+threadlocal var g_state: SweState = .{};
 
 const SE_VERSION = "2.10.03";
 const AS_MAXCH: usize = 256;
@@ -64,40 +78,40 @@ pub export fn swe_utc_time_zone(iyear: i32, imonth: i32, iday: i32, ihour: i32, 
 }
 pub export fn swe_calc(tjd: f64, ipl: i32, iflag: i32, xx: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var buf: [6]f64 = undefined;
-    const ret = sweph.swe_calc(tjd, ipl, iflag, &buf, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    const ret = sweph.swe_calc(tjd, ipl, iflag, &buf, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = buf[i];
     return ret;
 }
 pub export fn swe_calc_ut(tjd_ut: f64, ipl: i32, iflag: i32, xx: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var buf: [6]f64 = undefined;
-    const ret = sweph.swe_calc_ut(tjd_ut, ipl, iflag, &buf, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    const ret = sweph.swe_calc_ut(tjd_ut, ipl, iflag, &buf, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = buf[i];
     return ret;
 }
 pub export fn swe_set_topo(geolon: f64, geolat: f64, geoalt: f64) callconv(.c) void {
-    sweph.swe_set_topo(geolon, geolat, geoalt, &g_swed);
+    sweph.swe_set_topo(geolon, geolat, geoalt, &g_state.swed);
 }
 pub export fn swe_set_sid_mode(sid_mode: i32, t0: f64, ayan_t0: f64) callconv(.c) void {
-    sweph.swe_set_sid_mode(sid_mode, t0, ayan_t0, &g_swed, &g_models);
+    sweph.swe_set_sid_mode(sid_mode, t0, ayan_t0, &g_state.swed, &g_state.models);
 }
 pub export fn swe_get_ayanamsa_ex(tjd_et: f64, iflag: i32, daya: *f64, serr: ?[*:0]u8) callconv(.c) i32 {
-    return sweph.swe_get_ayanamsa_ex(tjd_et, iflag, daya, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    return sweph.swe_get_ayanamsa_ex(tjd_et, iflag, daya, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
 }
 pub export fn swe_get_ayanamsa_ex_ut(tjd_ut: f64, iflag: i32, daya: *f64, serr: ?[*:0]u8) callconv(.c) i32 {
-    return sweph.swe_get_ayanamsa_ex_ut(tjd_ut, iflag, daya, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    return sweph.swe_get_ayanamsa_ex_ut(tjd_ut, iflag, daya, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
 }
 pub export fn swe_set_ephe_path(path: ?[*:0]const u8) callconv(.c) void {
     var p: ?[]const u8 = null;
     if (path) |pp| p = pp[0..std.mem.len(pp)];
-    sweph.swe_set_ephe_path(p, &g_swed, &g_models, &g_dctx, null);
+    sweph.swe_set_ephe_path(p, &g_state.swed, &g_state.models, &g_state.dctx, null);
 }
 pub export fn swe_set_jpl_file(fname: ?[*:0]const u8) callconv(.c) void {
     var p: []const u8 = "";
     if (fname) |pp| p = pp[0..std.mem.len(pp)];
-    sweph.swe_set_jpl_file(p, &g_swed, &g_models, &g_dctx);
+    sweph.swe_set_jpl_file(p, &g_state.swed, &g_state.models, &g_state.dctx);
 }
 pub export fn swe_set_interpolate_nut(do_interpolate: c_int) callconv(.c) void {
-    sweph.swe_set_interpolate_nut(do_interpolate != 0, &g_swed);
+    sweph.swe_set_interpolate_nut(do_interpolate != 0, &g_state.swed);
 }
 pub export fn swe_degnorm(x: f64) callconv(.c) f64 {
     return swephlib.swe_degnorm(x);
@@ -126,9 +140,9 @@ pub export fn swe_get_library_path(s: [*:0]u8) callconv(.c) [*:0]u8 {
     return s;
 }
 pub export fn swe_close() callconv(.c) void {
-    g_swed = .{};
-    g_models = .{};
-    g_dctx = .{};
+    g_state.swed = .{};
+    g_state.models = .{};
+    g_state.dctx = .{};
 }
 
 // Pure helpers — correct transliteration
@@ -258,7 +272,7 @@ fn split_deg_nakshatra(ddeg_in: f64, roundflag: i32, ideg: *i32, imin: *i32, ise
         inak.* = -1;
         ddeg = 0;
     }
-    if ((g_swed.sidd.sid_mode & 39) == 39) {
+    if ((g_state.swed.sidd.sid_mode & 39) == 39) {
         ddeg = swephlib.swe_degnorm(ddeg + 3.33333333333333);
     }
     if ((roundflag & 4) != 0) {
@@ -341,37 +355,37 @@ pub export fn swe_split_deg(ddeg: f64, roundflag: i32, ideg: *i32, imin: *i32, i
     if ((roundflag & (4 | 2)) != 0) isec.* = 0;
 }
 pub export fn swe_deltat(tjd: f64) callconv(.c) f64 {
-    return deltat.swe_deltat_ex(&g_dctx, tjd, -1);
+    return deltat.swe_deltat_ex(&g_state.dctx, tjd, -1);
 }
 pub export fn swe_deltat_ex(tjd: f64, iflag: i32, serr: ?[*:0]u8) callconv(.c) f64 {
     _ = serr;
-    g_dctx.sweph_denum = g_swed.fidat[1].sweph_denum;
-    return deltat.swe_deltat_ex(&g_dctx, tjd, iflag);
+    g_state.dctx.sweph_denum = g_state.swed.fidat[1].sweph_denum;
+    return deltat.swe_deltat_ex(&g_state.dctx, tjd, iflag);
 }
 pub export fn swe_get_tid_acc() callconv(.c) f64 {
-    if (g_dctx.is_tid_acc_manual) return g_dctx.tid_acc;
+    if (g_state.dctx.is_tid_acc_manual) return g_state.dctx.tid_acc;
     return deltat.SE_TIDAL_DEFAULT;
 }
 pub export fn swe_set_tid_acc(t: f64) callconv(.c) void {
     if (t == 999999) {
-        g_dctx.is_tid_acc_manual = false;
-        g_swed.is_tid_acc_manual = false;
+        g_state.dctx.is_tid_acc_manual = false;
+        g_state.swed.is_tid_acc_manual = false;
     } else {
-        g_dctx.is_tid_acc_manual = true;
-        g_dctx.tid_acc = t;
-        g_swed.tid_acc = t;
-        g_swed.is_tid_acc_manual = true;
+        g_state.dctx.is_tid_acc_manual = true;
+        g_state.dctx.tid_acc = t;
+        g_state.swed.tid_acc = t;
+        g_state.swed.is_tid_acc_manual = true;
     }
 }
 pub export fn swe_set_delta_t_userdef(dt: f64) callconv(.c) void {
-    if (dt == -1e-10) g_dctx.delta_t_userdef_is_set = false else {
-        g_dctx.delta_t_userdef_is_set = true;
-        g_dctx.delta_t_userdef = dt;
+    if (dt == -1e-10) g_state.dctx.delta_t_userdef_is_set = false else {
+        g_state.dctx.delta_t_userdef_is_set = true;
+        g_state.dctx.delta_t_userdef = dt;
     }
 }
 const J1972: f64 = 2441317.5;
 const NLEAP_INIT: i32 = 10;
-threadlocal var g_leap_seconds: [100]i32 = blk: {
+const g_leap_seconds: [100]i32 = blk: {
     var arr: [100]i32 = [_]i32{0} ** 100;
     arr[0] = 19720630;
     arr[1] = 19721231;
@@ -423,8 +437,8 @@ fn init_leapsec() i32 {
     return tabsiz;
 }
 inline fn delta_ex(tjd: f64) f64 {
-    g_dctx.sweph_denum = g_swed.fidat[1].sweph_denum;
-    return deltat.swe_deltat_ex(&g_dctx, tjd, -1);
+    g_state.dctx.sweph_denum = g_state.swed.fidat[1].sweph_denum;
+    return deltat.swe_deltat_ex(&g_state.dctx, tjd, -1);
 }
 // 1:1 transliteration of swe_utc_to_jd from swedate.c
 pub export fn swe_utc_to_jd(iyear: i32, imonth: i32, iday: i32, ihour: i32, imin: i32, dsec: f64, gregflag: i32, dret: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
@@ -606,22 +620,22 @@ pub export fn swe_time_equ(tjd_ut: f64, E: *f64, serr: ?[*:0]u8) callconv(.c) i3
     serr_buf[0] = 0;
     var serr_slice: ?[]u8 = null;
     if (serr != null) serr_slice = serr_buf[0..];
-    var sidt = swephlib.swe_sidtime(tjd_ut, g_models, &g_dctx, null);
+    var sidt = swephlib.swe_sidtime(tjd_ut, g_state.models, &g_state.dctx, null);
     var iflag: i32 = sweph.SEFLG_EQUATORIAL;
-    iflag = sweph.plausPublic(iflag, -1, tjd_ut, &g_swed, g_models);
-    if (!g_swed.ephe_path_is_set and !g_swed.jpl_file_is_open and (iflag & sweph.SEFLG_MOSEPH) == 0 and serr_slice != null) {
+    iflag = sweph.plausPublic(iflag, -1, tjd_ut, &g_state.swed, g_state.models);
+    if (!g_state.swed.ephe_path_is_set and !g_state.swed.jpl_file_is_open and (iflag & sweph.SEFLG_MOSEPH) == 0 and serr_slice != null) {
         const msg = "Please call swe_set_ephe_path() or swe_set_jplfile() before calling swe_time_equ(), swe_lmt_to_lat() or swe_lat_to_lmt()";
         const n = @min(msg.len, serr_slice.?.len - 1);
         @memcpy(serr_slice.?[0..n], msg[0..n]);
         serr_slice.?[n] = 0;
     }
-    if (g_swed.jpl_file_is_open) iflag |= sweph.SEFLG_JPLEPH;
+    if (g_state.swed.jpl_file_is_open) iflag |= sweph.SEFLG_JPLEPH;
     const t = tjd_ut + 0.5;
     var dt = t - @floor(t);
     sidt -= dt * 24.0;
     sidt *= 15.0;
     var x: [6]f64 = undefined;
-    const ret = sweph.swe_calc_ut(tjd_ut, 0, iflag, &x, &g_swed, g_models, &g_dctx, serr_slice);
+    const ret = sweph.swe_calc_ut(tjd_ut, 0, iflag, &x, &g_state.swed, g_state.models, &g_state.dctx, serr_slice);
     if (ret == -1) {
         E.* = 0;
         if (serr != null and serr_slice != null) {
@@ -681,26 +695,26 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
         serr_ptr = &serr_buf;
     }
     // ayana auto-set
-    if ((iflag & sweph.SEFLG_SIDEREAL) != 0 and !g_swed.ayana_is_set) {
-        sweph.swe_set_sid_mode(0, 0, 0, &g_swed, &g_models);
+    if ((iflag & sweph.SEFLG_SIDEREAL) != 0 and !g_state.swed.ayana_is_set) {
+        sweph.swe_set_sid_mode(0, 0, 0, &g_state.swed, &g_state.models);
     }
-    const tjde = tjd_ut + deltat.swe_deltat_ex(&g_dctx, tjd_ut, iflag);
-    const eps_mean = swephlib.swi_epsiln(tjde, 0, g_models) * RADTODEG;
+    const tjde = tjd_ut + deltat.swe_deltat_ex(&g_state.dctx, tjd_ut, iflag);
+    const eps_mean = swephlib.swi_epsiln(tjde, 0, g_state.models) * RADTODEG;
     var nutlo: [2]f64 = undefined;
-    _ = swephlib.swi_nutation(tjde, 0, &nutlo, g_models, null);
+    _ = swephlib.swi_nutation(tjde, 0, &nutlo, g_state.models, null);
     nutlo[0] *= RADTODEG;
     nutlo[1] *= RADTODEG;
     if ((iflag & sweph.SEFLG_NONUT) != 0) {
         nutlo[0] = 0;
         nutlo[1] = 0;
     }
-    const armc = swephlib.swe_degnorm(swephlib.swe_sidtime0(tjd_ut, eps_mean + nutlo[1], nutlo[0], g_models, &g_dctx, null) * 15.0 + geolon);
+    const armc = swephlib.swe_degnorm(swephlib.swe_sidtime0(tjd_ut, eps_mean + nutlo[1], nutlo[0], g_state.models, &g_state.dctx, null) * 15.0 + geolon);
     var xp: [6]f64 = undefined;
     var retc_makr: i32 = 0;
     const hsys_u: u8 = std.ascii.toUpper(@as(u8, @truncate(@as(u32, @bitCast(hsys)))));
     if (hsys_u == 'I') {
         const flags: i32 = sweph.SEFLG_SPEED | sweph.SEFLG_EQUATORIAL;
-        retc_makr = sweph.swe_calc_ut(tjd_ut, 0, flags, &xp, &g_swed, g_models, &g_dctx, null);
+        retc_makr = sweph.swe_calc_ut(tjd_ut, 0, flags, &xp, &g_state.swed, g_state.models, &g_state.dctx, null);
         if (retc_makr >= 0) {
             asc[9] = xp[1];
         } else {
@@ -717,7 +731,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
     // copy ito handling for RADIANS later
     if ((iflag & sweph.SEFLG_SIDEREAL) != 0) {
         // check sid_mode bits
-        const sid_mode = g_swed.sidd.sid_mode;
+        const sid_mode = g_state.swed.sidd.sid_mode;
         const SE_SIDBIT_ECL_T0: i32 = 256;
         const SE_SIDBIT_SSY_PLANE: i32 = 512;
         if ((sid_mode & SE_SIDBIT_ECL_T0) != 0 or (sid_mode & SE_SIDBIT_SSY_PLANE) != 0) {
@@ -726,10 +740,10 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
         }
         // traditional ayanamsha method
         var ay: f64 = 0;
-        _ = sweph.swe_get_ayanamsa_ex(tjde, iflag, &ay, &g_swed, g_models, &g_dctx, null);
+        _ = sweph.swe_get_ayanamsa_ex(tjde, iflag, &ay, &g_state.swed, g_state.models, &g_state.dctx, null);
         var hsys2: i32 = hsys;
         if (hsys_u == 'W') hsys2 = 'E';
-        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], hsys2, &cs, &asc, csp, ascp, serr_ptr, &g_house);
+        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], hsys2, &cs, &asc, csp, ascp, serr_ptr, &g_state.house);
         for (1..ito + 1) |i| {
             cs[i] = swephlib.swe_degnorm(cs[i] - ay);
             if (hsys_u == 'W') {
@@ -749,7 +763,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
         // if Sunshine fallback needed and calc failed, force Porphyry for compatibility (C sets hsys='O')
         var eff_hsys: i32 = hsys;
         if (hsys_u == 'I' and retc_makr < 0) eff_hsys = 'O';
-        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], eff_hsys, &cs, &asc, csp, ascp, serr_ptr, &g_house);
+        retc = swehouse.swe_houses_armc_ex2(armc, geolat, eps_mean + nutlo[1], eff_hsys, &cs, &asc, csp, ascp, serr_ptr, &g_state.house);
         if (hsys_u == 'I' and retc_makr >= 0) asc[9] = xp[1];
     }
     if ((iflag & sweph.SEFLG_RADIANS) != 0) {
@@ -781,7 +795,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
 pub export fn swe_houses_armc(armc: f64, geolat: f64, eps: f64, hsys: i32, cusps: [*]f64, ascmc: [*]f64) callconv(.c) i32 {
     var cs: [37]f64 = undefined;
     var asc: [10]f64 = undefined;
-    const ret = swehouse.swe_houses_armc(armc, geolat, eps, hsys, &cs, &asc, &g_house);
+    const ret = swehouse.swe_houses_armc(armc, geolat, eps, hsys, &cs, &asc, &g_state.house);
     for (0..13) |i| cusps[i] = cs[i];
     for (0..10) |i| ascmc[i] = asc[i];
     return ret;
@@ -801,7 +815,7 @@ pub export fn swe_houses_armc_ex2(armc: f64, geolat: f64, eps: f64, hsys: i32, c
     var ascp: ?*[10]f64 = null;
     if (cusp_speed) |p| csp = @ptrCast(p);
     if (ascmc_speed) |p| ascp = @ptrCast(p);
-    const ret = swehouse.swe_houses_armc_ex2(armc, geolat, eps, hsys, &cs, &asc, csp, ascp, serr_ptr, &g_house);
+    const ret = swehouse.swe_houses_armc_ex2(armc, geolat, eps, hsys, &cs, &asc, csp, ascp, serr_ptr, &g_state.house);
     for (0..13) |i| cusps[i] = cs[i];
     for (0..10) |i| ascmc[i] = asc[i];
     if (csp != null) {
@@ -825,7 +839,7 @@ pub export fn swe_house_pos(armc: f64, geolat: f64, eps: f64, hsys: i32, xpin: [
         serr_ptr = &serr_buf;
         serr_buf[0] = 0;
     }
-    const ret = swehouse.swe_house_pos(armc, geolat, eps, hsys, &xin, serr_ptr, &g_house);
+    const ret = swehouse.swe_house_pos(armc, geolat, eps, hsys, &xin, serr_ptr, &g_state.house);
     if (serr != null and serr_ptr != null) {
         const l = std.mem.indexOfScalar(u8, &serr_buf, 0) orelse 0;
         @memcpy(serr.?[0..l], serr_buf[0..l]);
@@ -839,10 +853,10 @@ pub export fn swe_house_name(hsys: i32) callconv(.c) [*:0]const u8 {
 }
 const CROSS_PRECISION: f64 = 1.0 / 3600000.0;
 inline fn abiDelta(tjd: f64, epheflag: i32) f64 {
-    g_dctx.sweph_denum = g_swed.fidat[1].sweph_denum;
-    g_dctx.jpldenum = g_swed.jpldenum;
-    g_dctx.jpl_file_is_open = g_swed.jpl_file_is_open;
-    return deltat.swe_deltat_ex(&g_dctx, tjd, epheflag);
+    g_state.dctx.sweph_denum = g_state.swed.fidat[1].sweph_denum;
+    g_state.dctx.jpldenum = g_state.swed.jpldenum;
+    g_state.dctx.jpl_file_is_open = g_state.swed.jpl_file_is_open;
+    return deltat.swe_deltat_ex(&g_state.dctx, tjd, epheflag);
 }
 inline fn setSerrFmt(serr: ?[*:0]u8, comptime fmt: []const u8, args: anytype) void {
     if (serr) |s| {
@@ -875,9 +889,9 @@ fn plaus_abi(iflag_in: i32, ipl: i32, tjd: f64, serr: ?[*:0]u8) i32 {
     if (ipl == 11 or ipl == 10 or ipl == 12 or ipl == 13 or ipl == 21 or ipl == 22) iflag &= ~(sweph.SEFLG_JPLHOR | sweph.SEFLG_JPLHOR_APPROX);
     if (ipl >= 40 and ipl <= 999) iflag &= ~(sweph.SEFLG_JPLHOR | sweph.SEFLG_JPLHOR_APPROX);
     if ((iflag & sweph.SEFLG_JPLHOR) != 0) {
-        if (g_swed.eop_dpsi_loaded <= 0) {
+        if (g_state.swed.eop_dpsi_loaded <= 0) {
             if (serr) |s| {
-                const msg: []const u8 = switch (g_swed.eop_dpsi_loaded) {
+                const msg: []const u8 = switch (g_state.swed.eop_dpsi_loaded) {
                     0 => "you did not call swe_set_jpl_file(); default to SEFLG_JPLHOR_APPROX",
                     -1 => "file eop_1962_today.txt not found; default to SEFLG_JPLHOR_APPROX",
                     -2 => "file eop_1962_today.txt corrupt; default to SEFLG_JPLHOR_APPROX",
@@ -895,16 +909,16 @@ fn plaus_abi(iflag_in: i32, ipl: i32, tjd: f64, serr: ?[*:0]u8) i32 {
         }
     }
     if ((iflag & sweph.SEFLG_JPLHOR) != 0) iflag |= sweph.SEFLG_ICRS;
-    if ((iflag & sweph.SEFLG_JPLHOR_APPROX) != 0 and g_models.jplhora == 2) iflag |= sweph.SEFLG_ICRS;
+    if ((iflag & sweph.SEFLG_JPLHOR_APPROX) != 0 and g_state.models.jplhora == 2) iflag |= sweph.SEFLG_ICRS;
     _ = tjd;
     return iflag;
 }
 fn abi_get_denum(epheflag: i32) i32 {
     if ((epheflag & sweph.SEFLG_MOSEPH) != 0) return 403;
     if ((epheflag & sweph.SEFLG_JPLEPH) != 0) {
-        if (g_swed.jpldenum > 0) return g_swed.jpldenum else return 431;
+        if (g_state.swed.jpldenum > 0) return g_state.swed.jpldenum else return 431;
     }
-    if (g_swed.fidat[0].sweph_denum != 0) return g_swed.fidat[0].sweph_denum;
+    if (g_state.swed.fidat[0].sweph_denum != 0) return g_state.swed.fidat[0].sweph_denum;
     return 431;
 }
 pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxret: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
@@ -919,7 +933,7 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
     {
         var xx_tmp: [6]f64 = undefined;
         const dt0 = abiDelta(tjd, epheflag);
-        const ret0 = sweph.swe_calc(tjd + dt0, -1, iflag, &xx_tmp, &g_swed, g_models, &g_dctx, serrToZig(serr));
+        const ret0 = sweph.swe_calc(tjd + dt0, -1, iflag, &xx_tmp, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
         _ = ret0;
     }
     iflag &= ~(sweph.SEFLG_HELCTR | sweph.SEFLG_BARYCTR);
@@ -938,9 +952,9 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
     var dt: f64 = 0;
     var dtsave_for_defl: f64 = 0;
     var daya: [2]f64 = .{ 0, 0 };
-    var retc = sweph.swe_calc(tjd, iplctr, iflag2, &xxctr, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    var retc = sweph.swe_calc(tjd, iplctr, iflag2, &xxctr, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     if (retc == -1) return -1;
-    retc = sweph.swe_calc(tjd, ipl, iflag2, &xx, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    retc = sweph.swe_calc(tjd, ipl, iflag2, &xx, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     if (retc == -1) return -1;
     for (0..6) |i| xx0[i] = xx[i];
     if ((iflag & sweph.SEFLG_TRUEPOS) == 0) {
@@ -975,8 +989,8 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
         if ((iflag & sweph.SEFLG_SPEED) != 0) {
             for (0..3) |i| xxsp[i] = xx0[i] - xx[i] - xxsp[i];
         }
-        retc = sweph.swe_calc(t, iplctr, iflag2, &xxctr2, &g_swed, g_models, &g_dctx, serrToZig(serr));
-        retc = sweph.swe_calc(t, ipl, iflag2, &xx, &g_swed, g_models, &g_dctx, serrToZig(serr));
+        retc = sweph.swe_calc(t, iplctr, iflag2, &xxctr2, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
+        retc = sweph.swe_calc(t, ipl, iflag2, &xx, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     }
     if ((iflag & sweph.SEFLG_HELCTR) == 0 and (iflag & sweph.SEFLG_BARYCTR) == 0) {
         for (0..6) |i| xx[i] -= xxctr[i];
@@ -990,7 +1004,7 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
         for (3..6) |i| xx[i] = 0;
     }
     if ((iflag & sweph.SEFLG_TRUEPOS) == 0 and (iflag & sweph.SEFLG_NOGDEFL) == 0) {
-        sweph.swi_deflect_light(&xx, dtsave_for_defl, iflag, &g_swed);
+        sweph.swi_deflect_light(&xx, dtsave_for_defl, iflag, &g_state.swed);
     }
     if ((iflag & sweph.SEFLG_TRUEPOS) == 0 and (iflag & sweph.SEFLG_NOABERR) == 0) {
         sweph.swi_aberr_light(&xx, &xxctr, iflag);
@@ -1002,36 +1016,36 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
         for (3..6) |i| xx[i] = 0;
     }
     if ((iflag & sweph.SEFLG_ICRS) == 0 and abi_get_denum(epheflag) >= 403) {
-        swephlib.swi_bias(&xx, t, iflag, false, g_models);
+        swephlib.swi_bias(&xx, t, iflag, false, g_state.models);
     }
     for (0..6) |i| xxsv[i] = xx[i];
     var oe: *const swephlib.Eps = undefined;
     if ((iflag & sweph.SEFLG_J2000) == 0) {
         // swi_precess expects * [3]f64
-        _ = swephlib.swi_precess(@as(*[3]f64, @ptrCast(&xx[0])), tjd, iflag, swephlib.J2000_TO_J, g_models);
-        if ((iflag & sweph.SEFLG_SPEED) != 0) sweph.swi_precess_speed(&xx, tjd, iflag, swephlib.J2000_TO_J, &g_swed, g_models);
-        oe = &g_swed.oec;
+        _ = swephlib.swi_precess(@as(*[3]f64, @ptrCast(&xx[0])), tjd, iflag, swephlib.J2000_TO_J, g_state.models);
+        if ((iflag & sweph.SEFLG_SPEED) != 0) sweph.swi_precess_speed(&xx, tjd, iflag, swephlib.J2000_TO_J, &g_state.swed, g_state.models);
+        oe = &g_state.swed.oec;
     } else {
-        oe = &g_swed.oec2000;
+        oe = &g_state.swed.oec2000;
     }
-    if ((iflag & sweph.SEFLG_NONUT) == 0) sweph.swi_nutate(&xx, iflag, false, &g_swed);
+    if ((iflag & sweph.SEFLG_NONUT) == 0) sweph.swi_nutate(&xx, iflag, false, &g_state.swed);
     for (0..6) |i| xreturn[18 + i] = xx[i];
     swephlib.swi_coortrf2(@as(*const [3]f64, @ptrCast(&xx[0])), @as(*[3]f64, @ptrCast(&xx[0])), oe.seps, oe.ceps);
     if ((iflag & sweph.SEFLG_SPEED) != 0) swephlib.swi_coortrf2(@as(*const [3]f64, @ptrCast(&xx[3])), @as(*[3]f64, @ptrCast(&xx[3])), oe.seps, oe.ceps);
     if ((iflag & sweph.SEFLG_NONUT) == 0) {
-        swephlib.swi_coortrf2(@as(*const [3]f64, @ptrCast(&xx[0])), @as(*[3]f64, @ptrCast(&xx[0])), g_swed.nut.snut, g_swed.nut.cnut);
-        if ((iflag & sweph.SEFLG_SPEED) != 0) swephlib.swi_coortrf2(@as(*const [3]f64, @ptrCast(&xx[3])), @as(*[3]f64, @ptrCast(&xx[3])), g_swed.nut.snut, g_swed.nut.cnut);
+        swephlib.swi_coortrf2(@as(*const [3]f64, @ptrCast(&xx[0])), @as(*[3]f64, @ptrCast(&xx[0])), g_state.swed.nut.snut, g_state.swed.nut.cnut);
+        if ((iflag & sweph.SEFLG_SPEED) != 0) swephlib.swi_coortrf2(@as(*const [3]f64, @ptrCast(&xx[3])), @as(*[3]f64, @ptrCast(&xx[3])), g_state.swed.nut.snut, g_state.swed.nut.cnut);
     }
     for (0..6) |i| xreturn[6 + i] = xx[i];
     if ((iflag & sweph.SEFLG_SIDEREAL) != 0) {
-        if ((g_swed.sidd.sid_mode & sweph.SE_SIDBIT_ECL_T0) != 0) {
-            if (sweph.swi_trop_ra2sid_lon(@as(*const [6]f64, @ptrCast(&xxsv[0])), @as(*[6]f64, @ptrCast(&xreturn[6])), @as(*[6]f64, @ptrCast(&xreturn[18])), iflag, &g_swed, g_models, &g_dctx) != 0) return -1;
-        } else if ((g_swed.sidd.sid_mode & sweph.SE_SIDBIT_SSY_PLANE) != 0) {
-            if (sweph.swi_trop_ra2sid_lon_sosy(@as(*const [6]f64, @ptrCast(&xxsv[0])), @as(*[6]f64, @ptrCast(&xreturn[6])), iflag, &g_swed, g_models, &g_dctx) != 0) return -1;
+        if ((g_state.swed.sidd.sid_mode & sweph.SE_SIDBIT_ECL_T0) != 0) {
+            if (sweph.swi_trop_ra2sid_lon(@as(*const [6]f64, @ptrCast(&xxsv[0])), @as(*[6]f64, @ptrCast(&xreturn[6])), @as(*[6]f64, @ptrCast(&xreturn[18])), iflag, &g_state.swed, g_state.models, &g_state.dctx) != 0) return -1;
+        } else if ((g_state.swed.sidd.sid_mode & sweph.SE_SIDBIT_SSY_PLANE) != 0) {
+            if (sweph.swi_trop_ra2sid_lon_sosy(@as(*const [6]f64, @ptrCast(&xxsv[0])), @as(*[6]f64, @ptrCast(&xreturn[6])), iflag, &g_state.swed, g_state.models, &g_state.dctx) != 0) return -1;
         } else {
             swephlib.swi_cartpol_sp(@as(*[6]f64, @ptrCast(&xreturn[6])), @as(*[6]f64, @ptrCast(&xreturn[0])));
             for (0..24) |i| xxsv[i] = xreturn[i];
-            if (sweph.swi_get_ayanamsa_with_speed(tjd, iflag, &daya, &g_swed, g_models, &g_dctx, serrToZig(serr)) == -1) return -1;
+            if (sweph.swi_get_ayanamsa_with_speed(tjd, iflag, &daya, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) == -1) return -1;
             for (0..24) |i| xreturn[i] = xxsv[i];
             xreturn[0] -= daya[0] * swephlib.DEGTORAD;
             xreturn[3] -= daya[1] * swephlib.DEGTORAD;
@@ -1065,12 +1079,12 @@ pub export fn swe_calc_pctr(tjd: f64, ipl: i32, iplctr: i32, iflag_in: i32, xxre
 pub export fn swe_solcross(x2cross: f64, jd_et: f64, flag_in: i32, serr: ?[*:0]u8) callconv(.c) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, 0, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+    if (sweph.swe_calc(jd_et, 0, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
     const xlp: f64 = 360.0 / 365.24;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
     var jd = jd_et + dist / xlp;
     while (true) {
-        if (sweph.swe_calc(jd, 0, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+        if (sweph.swe_calc(jd, 0, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
@@ -1080,12 +1094,12 @@ pub export fn swe_solcross(x2cross: f64, jd_et: f64, flag_in: i32, serr: ?[*:0]u
 pub export fn swe_solcross_ut(x2cross: f64, jd_ut: f64, flag_in: i32, serr: ?[*:0]u8) callconv(.c) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, 0, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+    if (sweph.swe_calc_ut(jd_ut, 0, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
     const xlp: f64 = 360.0 / 365.24;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
     var jd = jd_ut + dist / xlp;
     while (true) {
-        if (sweph.swe_calc_ut(jd, 0, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+        if (sweph.swe_calc_ut(jd, 0, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
@@ -1095,12 +1109,12 @@ pub export fn swe_solcross_ut(x2cross: f64, jd_ut: f64, flag_in: i32, serr: ?[*:
 pub export fn swe_mooncross(x2cross: f64, jd_et: f64, flag_in: i32, serr: ?[*:0]u8) callconv(.c) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+    if (sweph.swe_calc(jd_et, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
     const xlp: f64 = 360.0 / 27.32;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
     var jd = jd_et + dist / xlp;
     while (true) {
-        if (sweph.swe_calc(jd, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+        if (sweph.swe_calc(jd, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
@@ -1110,12 +1124,12 @@ pub export fn swe_mooncross(x2cross: f64, jd_et: f64, flag_in: i32, serr: ?[*:0]
 pub export fn swe_mooncross_ut(x2cross: f64, jd_ut: f64, flag_in: i32, serr: ?[*:0]u8) callconv(.c) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+    if (sweph.swe_calc_ut(jd_ut, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
     const xlp: f64 = 360.0 / 27.32;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
     var jd = jd_ut + dist / xlp;
     while (true) {
-        if (sweph.swe_calc_ut(jd, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+        if (sweph.swe_calc_ut(jd, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
@@ -1125,18 +1139,18 @@ pub export fn swe_mooncross_ut(x2cross: f64, jd_ut: f64, flag_in: i32, serr: ?[*
 pub export fn swe_mooncross_node(jd_et: f64, flag_in: i32, xlon: *f64, xlat: *f64, serr: ?[*:0]u8) callconv(.c) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+    if (sweph.swe_calc(jd_et, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
     const xlat0 = x[1];
     var jd = jd_et + 1;
     while (true) {
-        if (sweph.swe_calc(jd, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+        if (sweph.swe_calc(jd, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
         if ((x[1] >= 0 and xlat0 < 0) or (x[1] < 0 and xlat0 > 0)) break;
         jd += 1;
     }
     var dist = x[1];
     while (true) {
         jd -= dist / x[4];
-        if (sweph.swe_calc(jd, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_et - 1;
+        if (sweph.swe_calc(jd, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_et - 1;
         dist = x[1];
         if (@abs(dist) < CROSS_PRECISION) {
             xlon.* = x[0];
@@ -1149,18 +1163,18 @@ pub export fn swe_mooncross_node(jd_et: f64, flag_in: i32, xlon: *f64, xlat: *f6
 pub export fn swe_mooncross_node_ut(jd_ut: f64, flag_in: i32, xlon: *f64, xlat: *f64, serr: ?[*:0]u8) callconv(.c) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+    if (sweph.swe_calc_ut(jd_ut, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
     const xlat0 = x[1];
     var jd = jd_ut + 1;
     while (true) {
-        if (sweph.swe_calc_ut(jd, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+        if (sweph.swe_calc_ut(jd, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
         if ((x[1] >= 0 and xlat0 < 0) or (x[1] < 0 and xlat0 > 0)) break;
         jd += 1;
     }
     var dist = x[1];
     while (true) {
         jd -= dist / x[4];
-        if (sweph.swe_calc_ut(jd, 1, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return jd_ut - 1;
+        if (sweph.swe_calc_ut(jd, 1, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
         dist = x[1];
         if (@abs(dist) < CROSS_PRECISION) {
             xlon.* = x[0];
@@ -1174,14 +1188,14 @@ pub export fn swe_helio_cross(ipl: i32, x2cross: f64, jd_et: f64, iflag_in: i32,
     const flag = iflag_in | sweph.SEFLG_SPEED | sweph.SEFLG_HELCTR;
     if (ipl == 0 or ipl == 1 or (ipl >= 10 and ipl <= 13) or (ipl >= 21 and ipl < 23)) {
         var sbuf: [256]u8 = undefined;
-        _ = sweph.swe_get_planet_name(ipl, &sbuf, &g_swed, g_models, &g_dctx, null);
+        _ = sweph.swe_get_planet_name(ipl, &sbuf, &g_state.swed, g_state.models, &g_state.dctx, null);
         const slen = std.mem.indexOfScalar(u8, &sbuf, 0) orelse 0;
         const name = sbuf[0..slen];
         setSerrFmt(serr, "swe_helio_cross: not possible for object {d} = {s}", .{ ipl, name });
         return -1;
     }
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, ipl, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return -1;
+    if (sweph.swe_calc(jd_et, ipl, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return -1;
     var xlp = x[3];
     if (ipl == 15) xlp = 0.01971;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
@@ -1191,7 +1205,7 @@ pub export fn swe_helio_cross(ipl: i32, x2cross: f64, jd_et: f64, iflag_in: i32,
         jd = jd_et - dist / xlp;
     }
     while (true) {
-        if (sweph.swe_calc(jd, ipl, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return -1;
+        if (sweph.swe_calc(jd, ipl, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return -1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
@@ -1203,14 +1217,14 @@ pub export fn swe_helio_cross_ut(ipl: i32, x2cross: f64, jd_ut: f64, iflag_in: i
     const flag = iflag_in | sweph.SEFLG_SPEED | sweph.SEFLG_HELCTR;
     if (ipl == 0 or ipl == 1 or (ipl >= 10 and ipl <= 13) or (ipl >= 21 and ipl < 23)) {
         var sbuf: [256]u8 = undefined;
-        _ = sweph.swe_get_planet_name(ipl, &sbuf, &g_swed, g_models, &g_dctx, null);
+        _ = sweph.swe_get_planet_name(ipl, &sbuf, &g_state.swed, g_state.models, &g_state.dctx, null);
         const slen = std.mem.indexOfScalar(u8, &sbuf, 0) orelse 0;
         const name = sbuf[0..slen];
         setSerrFmt(serr, "swe_helio_cross: not possible for object {d} = {s}", .{ ipl, name });
         return -1;
     }
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, ipl, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return -1;
+    if (sweph.swe_calc_ut(jd_ut, ipl, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return -1;
     var xlp = x[3];
     if (ipl == 15) xlp = 0.01971;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
@@ -1220,7 +1234,7 @@ pub export fn swe_helio_cross_ut(ipl: i32, x2cross: f64, jd_ut: f64, iflag_in: i
         jd = jd_ut - dist / xlp;
     }
     while (true) {
-        if (sweph.swe_calc_ut(jd, ipl, flag, &x, &g_swed, g_models, &g_dctx, serrToZig(serr)) < 0) return -1;
+        if (sweph.swe_calc_ut(jd, ipl, flag, &x, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr)) < 0) return -1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
@@ -1262,18 +1276,18 @@ pub export fn swe_set_timeout(tsec: i32) callconv(.c) void {
     _ = tsec;
 }
 pub export fn swe_sidtime0(tjd_ut: f64, eps: f64, nut: f64) callconv(.c) f64 {
-    return swephlib.swe_sidtime0(tjd_ut, eps, nut, g_models, &g_dctx, null);
+    return swephlib.swe_sidtime0(tjd_ut, eps, nut, g_state.models, &g_state.dctx, null);
 }
 pub export fn swe_sidtime(tjd_ut: f64) callconv(.c) f64 {
-    return swephlib.swe_sidtime(tjd_ut, g_models, &g_dctx, null);
+    return swephlib.swe_sidtime(tjd_ut, g_state.models, &g_state.dctx, null);
 }
 
 // --- Remaining 39 APIs that were omitted from minimal file — stubs for ABI completeness ---
 pub export fn swe_azalt(tjd_ut: f64, calc_flag: i32, geopos: [*]f64, atpress: f64, attemp: f64, xin: [*]f64, xaz: [*]f64) callconv(.c) void {
-    swecl.swe_azalt(tjd_ut, calc_flag, @ptrCast(geopos[0..3]), atpress, attemp, @ptrCast(xin[0..3]), @ptrCast(xaz[0..3]), &g_swed, g_models, &g_dctx, &g_swecl);
+    swecl.swe_azalt(tjd_ut, calc_flag, @ptrCast(geopos[0..3]), atpress, attemp, @ptrCast(xin[0..3]), @ptrCast(xaz[0..3]), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
 }
 pub export fn swe_azalt_rev(tjd_ut: f64, calc_flag: i32, geopos: [*]f64, xin: [*]f64, xout: [*]f64) callconv(.c) void {
-    swecl.swe_azalt_rev(tjd_ut, calc_flag, @ptrCast(geopos[0..3]), @ptrCast(xin[0..3]), @ptrCast(xout[0..2]), &g_swed, g_models, &g_dctx);
+    swecl.swe_azalt_rev(tjd_ut, calc_flag, @ptrCast(geopos[0..3]), @ptrCast(xin[0..3]), @ptrCast(xout[0..2]), &g_state.swed, g_state.models, &g_state.dctx);
 }
 pub export fn swe_deg_midp(x1: f64, x0: f64) callconv(.c) f64 {
     return swephlib.swe_deg_midp(x1, x0);
@@ -1287,7 +1301,7 @@ pub export fn swe_fixstar(star: [*:0]u8, tjd: f64, iflag: i32, xx: [*]f64, serr:
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar(buf[0..len], tjd, iflag, &out, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar(buf[0..len], tjd, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);
@@ -1300,7 +1314,7 @@ pub export fn swe_fixstar_ut(star: [*:0]u8, tjd_ut: f64, iflag: i32, xx: [*]f64,
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar_ut(buf[0..len], tjd_ut, iflag, &out, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar_ut(buf[0..len], tjd_ut, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);
@@ -1311,7 +1325,7 @@ pub export fn swe_fixstar_mag(star: [*:0]u8, mag: *f64, serr: ?[*:0]u8) callconv
     const len = std.mem.len(star);
     var buf: [256]u8 = undefined;
     @memcpy(buf[0..len], star[0..len]);
-    return sweph.swe_fixstar_mag(buf[0..len], mag, &g_swed, serrToZig(serr));
+    return sweph.swe_fixstar_mag(buf[0..len], mag, &g_state.swed, serrToZig(serr));
 }
 pub export fn swe_fixstar2(star: [*:0]u8, tjd: f64, iflag: i32, xx: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     const len = std.mem.len(star);
@@ -1319,7 +1333,7 @@ pub export fn swe_fixstar2(star: [*:0]u8, tjd: f64, iflag: i32, xx: [*]f64, serr
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar2(buf[0..len], tjd, iflag, &out, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar2(buf[0..len], tjd, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);
@@ -1332,7 +1346,7 @@ pub export fn swe_fixstar2_ut(star: [*:0]u8, tjd_ut: f64, iflag: i32, xx: [*]f64
     @memcpy(buf[0..len], star[0..len]);
     buf[len] = 0;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar2_ut(buf[0..len], tjd_ut, iflag, &out, &g_swed, g_models, &g_dctx, serrToZig(serr));
+    const ret = sweph.swe_fixstar2_ut(buf[0..len], tjd_ut, iflag, &out, &g_state.swed, g_state.models, &g_state.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     const slen = std.mem.indexOfScalar(u8, &buf, 0) orelse len;
     @memcpy(star[0..slen], buf[0..slen]);
@@ -1343,7 +1357,7 @@ pub export fn swe_fixstar2_mag(star: [*:0]u8, mag: *f64, serr: ?[*:0]u8) callcon
     const len = std.mem.len(star);
     var buf: [256]u8 = undefined;
     @memcpy(buf[0..len], star[0..len]);
-    return sweph.swe_fixstar2_mag(buf[0..len], mag, &g_swed, serrToZig(serr));
+    return sweph.swe_fixstar2_mag(buf[0..len], mag, &g_state.swed, serrToZig(serr));
 }
 pub export fn swe_gauquelin_sector(t_ut: f64, ipl: i32, starname: ?[*:0]u8, iflag: i32, imeth: i32, geopos: [*]f64, atpress: f64, attemp: f64, dgsect: *f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var star: ?[]u8 = null;
@@ -1354,32 +1368,32 @@ pub export fn swe_gauquelin_sector(t_ut: f64, ipl: i32, starname: ?[*:0]u8, ifla
         buf[l] = 0;
         star = buf[0..l];
     }
-    return swecl.swe_gauquelin_sector(t_ut, ipl, star, iflag, imeth, @ptrCast(geopos[0..3]), atpress, attemp, dgsect, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    return swecl.swe_gauquelin_sector(t_ut, ipl, star, iflag, imeth, @ptrCast(geopos[0..3]), atpress, attemp, dgsect, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
 }
 pub export fn swe_get_orbital_elements(tjd_et: f64, ipl: i32, iflag: i32, dret: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var buf: [50]f64 = undefined;
-    const ret = swecl.swe_get_orbital_elements(tjd_et, ipl, iflag, &buf, serrToZig(serr), &g_swed, g_models, &g_dctx);
+    const ret = swecl.swe_get_orbital_elements(tjd_et, ipl, iflag, &buf, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx);
     for (0..50) |i| dret[i] = buf[i];
     return ret;
 }
 pub export fn swe_get_planet_name(ipl: i32, spname: [*:0]u8) callconv(.c) [*:0]u8 {
     var buf: [256]u8 = undefined;
-    _ = sweph.swe_get_planet_name(ipl, &buf, &g_swed, g_models, &g_dctx, null);
+    _ = sweph.swe_get_planet_name(ipl, &buf, &g_state.swed, g_state.models, &g_state.dctx, null);
     const l = std.mem.indexOfScalar(u8, &buf, 0) orelse 0;
     @memcpy(spname[0..l], buf[0..l]);
     spname[l] = 0;
     return spname;
 }
 pub export fn swe_heliacal_angle(tjd: f64, dgeo: [*]f64, datm: [*]f64, dobs: [*]f64, helflag: i32, mag: f64, azi_obj: f64, azi_sun: f64, azi_moon: f64, alt_moon: f64, dret: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
-    return swehel.swe_heliacal_angle(tjd, @ptrCast(dgeo[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), helflag, mag, azi_obj, azi_sun, azi_moon, alt_moon, @ptrCast(dret[0..3]), serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl, &g_swehel);
+    return swehel.swe_heliacal_angle(tjd, @ptrCast(dgeo[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), helflag, mag, azi_obj, azi_sun, azi_moon, alt_moon, @ptrCast(dret[0..3]), serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx, &g_state.hctx);
 }
 pub export fn swe_heliacal_pheno_ut(tjd_ut: f64, geopos: [*]f64, datm: [*]f64, dobs: [*]f64, obj: [*:0]u8, evt: i32, helflag: i32, darr: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     const l = std.mem.len(obj);
-    return swehel.swe_heliacal_pheno_ut(tjd_ut, @ptrCast(geopos[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), obj[0..l], evt, helflag, @ptrCast(darr[0..40]), serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl, &g_swehel);
+    return swehel.swe_heliacal_pheno_ut(tjd_ut, @ptrCast(geopos[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), obj[0..l], evt, helflag, @ptrCast(darr[0..40]), serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx, &g_state.hctx);
 }
 pub export fn swe_heliacal_ut(tjd: f64, geopos: [*]f64, datm: [*]f64, dobs: [*]f64, obj: [*:0]u8, evt: i32, helflag: i32, dret: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     const l = std.mem.len(obj);
-    return swehel.swe_heliacal_ut(tjd, @ptrCast(geopos[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), obj[0..l], evt, helflag, @ptrCast(dret[0..10]), serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl, &g_swehel);
+    return swehel.swe_heliacal_ut(tjd, @ptrCast(geopos[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), obj[0..l], evt, helflag, @ptrCast(dret[0..10]), serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx, &g_state.hctx);
 }
 pub export fn swe_lun_eclipse_how(tjd_ut: f64, ifl: i32, geopos: ?[*]f64, attr: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var a: [20]f64 = undefined;
@@ -1391,13 +1405,13 @@ pub export fn swe_lun_eclipse_how(tjd_ut: f64, ifl: i32, geopos: ?[*]f64, attr: 
         g[2] = gp[2];
         gptr = &g;
     }
-    const ret = swecl.swe_lun_eclipse_how(tjd_ut, ifl, gptr, &a, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_lun_eclipse_how(tjd_ut, ifl, gptr, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..20) |i| attr[i] = a[i];
     return ret;
 }
 pub export fn swe_lun_eclipse_when(tjd_start: f64, ifl: i32, ifltype: i32, tret: [*]f64, backward: i32, serr: ?[*:0]u8) callconv(.c) i32 {
     var tt: [10]f64 = undefined;
-    const ret = swecl.swe_lun_eclipse_when(tjd_start, ifl, ifltype, &tt, backward, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_lun_eclipse_when(tjd_start, ifl, ifltype, &tt, backward, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..10) |i| tret[i] = tt[i];
     return ret;
 }
@@ -1405,7 +1419,7 @@ pub export fn swe_lun_eclipse_when_loc(tjd_start: f64, ifl: i32, geopos: [*]f64,
     var g: [3]f64 = .{ geopos[0], geopos[1], 0 };
     var tt: [10]f64 = undefined;
     var aa: [20]f64 = undefined;
-    const ret = swecl.swe_lun_eclipse_when_loc(tjd_start, ifl, &g, &tt, &aa, backward, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_lun_eclipse_when_loc(tjd_start, ifl, &g, &tt, &aa, backward, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..10) |i| tret[i] = tt[i];
     for (0..20) |i| attr[i] = aa[i];
     return ret;
@@ -1415,7 +1429,7 @@ pub export fn swe_lun_occult_when_glob(tjd_start: f64, ipl: i32, star: [*:0]u8, 
     var buf: [256]u8 = undefined;
     @memcpy(buf[0..l], star[0..l]);
     var tt: [10]f64 = undefined;
-    const ret = swecl.swe_lun_occult_when_glob(tjd_start, ipl, buf[0..l], ifl, ifltype, &tt, backward, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_lun_occult_when_glob(tjd_start, ipl, buf[0..l], ifl, ifltype, &tt, backward, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..10) |i| tret[i] = tt[i];
     return ret;
 }
@@ -1425,7 +1439,7 @@ pub export fn swe_lun_occult_when_loc(tjd_start: f64, ipl: i32, star: [*:0]u8, i
     @memcpy(buf[0..l], star[0..l]);
     var tt: [10]f64 = undefined;
     var aa: [20]f64 = undefined;
-    const ret = swecl.swe_lun_occult_when_loc(tjd_start, ipl, buf[0..l], ifl, @ptrCast(geopos[0..3]), &tt, &aa, backward, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_lun_occult_when_loc(tjd_start, ipl, buf[0..l], ifl, @ptrCast(geopos[0..3]), &tt, &aa, backward, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..10) |i| tret[i] = tt[i];
     for (0..20) |i| attr[i] = aa[i];
     return ret;
@@ -1442,7 +1456,7 @@ pub export fn swe_lun_occult_where(tjd: f64, ipl: i32, star: ?[*:0]u8, ifl: i32,
     }
     var g: [2]f64 = .{ geopos[0], geopos[1] };
     var a: [20]f64 = undefined;
-    const ret = swecl.swe_lun_occult_where(tjd, ipl, star_arg, ifl, &g, &a, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_lun_occult_where(tjd, ipl, star_arg, ifl, &g, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..2) |i| geopos[i] = g[i];
     for (0..20) |i| attr[i] = a[i];
     return ret;
@@ -1452,7 +1466,7 @@ pub export fn swe_nod_aps(tjd_et: f64, ipl: i32, iflag: i32, method: i32, xnasc:
     var d: [6]f64 = undefined;
     var p: [6]f64 = undefined;
     var a: [6]f64 = undefined;
-    const ret = swecl.swe_nod_aps(tjd_et, ipl, iflag, method, &n, &d, &p, &a, serrToZig(serr), &g_swed, g_models, &g_dctx);
+    const ret = swecl.swe_nod_aps(tjd_et, ipl, iflag, method, &n, &d, &p, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx);
     for (0..6) |i| xnasc[i] = n[i];
     for (0..6) |i| xndsc[i] = d[i];
     for (0..6) |i| xperi[i] = p[i];
@@ -1464,7 +1478,7 @@ pub export fn swe_nod_aps_ut(tjd_ut: f64, ipl: i32, iflag: i32, method: i32, xna
     var d: [6]f64 = undefined;
     var p: [6]f64 = undefined;
     var a: [6]f64 = undefined;
-    const ret = swecl.swe_nod_aps_ut(tjd_ut, ipl, iflag, method, &n, &d, &p, &a, serrToZig(serr), &g_swed, g_models, &g_dctx);
+    const ret = swecl.swe_nod_aps_ut(tjd_ut, ipl, iflag, method, &n, &d, &p, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx);
     for (0..6) |i| xnasc[i] = n[i];
     for (0..6) |i| xndsc[i] = d[i];
     for (0..6) |i| xperi[i] = p[i];
@@ -1472,17 +1486,17 @@ pub export fn swe_nod_aps_ut(tjd_ut: f64, ipl: i32, iflag: i32, method: i32, xna
     return ret;
 }
 pub export fn swe_orbit_max_min_true_distance(tjd: f64, ipl: i32, iflag: i32, dmax: *f64, dmin: *f64, dtrue: *f64, serr: ?[*:0]u8) callconv(.c) i32 {
-    return swecl.swe_orbit_max_min_true_distance(tjd, ipl, iflag, dmax, dmin, dtrue, serrToZig(serr), &g_swed, g_models, &g_dctx);
+    return swecl.swe_orbit_max_min_true_distance(tjd, ipl, iflag, dmax, dmin, dtrue, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx);
 }
 pub export fn swe_pheno(tjd: f64, ipl: i32, iflag: i32, attr: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var a: [20]f64 = undefined;
-    const ret = swecl.swe_pheno(tjd, ipl, iflag, &a, serrToZig(serr), &g_swed, g_models, &g_dctx);
+    const ret = swecl.swe_pheno(tjd, ipl, iflag, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx);
     for (0..20) |i| attr[i] = a[i];
     return ret;
 }
 pub export fn swe_pheno_ut(tjd_ut: f64, ipl: i32, iflag: i32, attr: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var a: [20]f64 = undefined;
-    const ret = swecl.swe_pheno_ut(tjd_ut, ipl, iflag, &a, serrToZig(serr), &g_swed, g_models, &g_dctx);
+    const ret = swecl.swe_pheno_ut(tjd_ut, ipl, iflag, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx);
     for (0..20) |i| attr[i] = a[i];
     return ret;
 }
@@ -1507,7 +1521,7 @@ pub export fn swe_rise_trans(tjd_ut: f64, ipl: i32, star: ?[*:0]u8, epheflag: i3
         buf[l] = 0;
         s = buf[0..l];
     }
-    return swecl.swe_rise_trans(tjd_ut, ipl, s, epheflag, rsmi, @ptrCast(geopos[0..3]), atpress, attemp, tret, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    return swecl.swe_rise_trans(tjd_ut, ipl, s, epheflag, rsmi, @ptrCast(geopos[0..3]), atpress, attemp, tret, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
 }
 pub export fn swe_rise_trans_true_hor(tjd_ut: f64, ipl: i32, star: ?[*:0]u8, epheflag: i32, rsmi: i32, geopos: [*]f64, atpress: f64, attemp: f64, hor: f64, tret: *f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var s: ?[]u8 = null;
@@ -1518,21 +1532,21 @@ pub export fn swe_rise_trans_true_hor(tjd_ut: f64, ipl: i32, star: ?[*:0]u8, eph
         buf[l] = 0;
         s = buf[0..l];
     }
-    return swecl.swe_rise_trans_true_hor(tjd_ut, ipl, s, epheflag, rsmi, @ptrCast(geopos[0..3]), atpress, attemp, hor, tret, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    return swecl.swe_rise_trans_true_hor(tjd_ut, ipl, s, epheflag, rsmi, @ptrCast(geopos[0..3]), atpress, attemp, hor, tret, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
 }
 pub export fn swe_set_lapse_rate(rate: f64) callconv(.c) void {
-    swecl.swe_set_lapse_rate(rate, &g_swecl);
+    swecl.swe_set_lapse_rate(rate, &g_state.cctx);
 }
 pub export fn swe_sol_eclipse_how(tjd: f64, ifl: i32, geopos: [*]f64, attr: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var g: [3]f64 = .{ geopos[0], geopos[1], geopos[2] };
     var a: [20]f64 = undefined;
-    const ret = swecl.swe_sol_eclipse_how(tjd, ifl, &g, &a, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_sol_eclipse_how(tjd, ifl, &g, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..20) |i| attr[i] = a[i];
     return ret;
 }
 pub export fn swe_sol_eclipse_when_glob(tjd: f64, ifl: i32, ifltype: i32, tret: [*]f64, b: i32, serr: ?[*:0]u8) callconv(.c) i32 {
     var tt: [10]f64 = undefined;
-    const ret = swecl.swe_sol_eclipse_when_glob(tjd, ifl, ifltype, &tt, b != 0, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_sol_eclipse_when_glob(tjd, ifl, ifltype, &tt, b != 0, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..10) |i| tret[i] = tt[i];
     return ret;
 }
@@ -1540,7 +1554,7 @@ pub export fn swe_sol_eclipse_when_loc(tjd: f64, ifl: i32, geopos: [*]f64, tret:
     var g: [3]f64 = .{ geopos[0], geopos[1], geopos[2] };
     var tt: [10]f64 = undefined;
     var aa: [20]f64 = undefined;
-    const ret = swecl.swe_sol_eclipse_when_loc(tjd, ifl, &g, &tt, &aa, b != 0, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_sol_eclipse_when_loc(tjd, ifl, &g, &tt, &aa, b != 0, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     for (0..10) |i| tret[i] = tt[i];
     for (0..20) |i| attr[i] = aa[i];
     return ret;
@@ -1548,18 +1562,18 @@ pub export fn swe_sol_eclipse_when_loc(tjd: f64, ifl: i32, geopos: [*]f64, tret:
 pub export fn swe_sol_eclipse_where(tjd: f64, ifl: i32, geopos: [*]f64, attr: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     var g: [2]f64 = .{ geopos[0], geopos[1] };
     var a: [20]f64 = undefined;
-    const ret = swecl.swe_sol_eclipse_where(tjd, ifl, &g, &a, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl);
+    const ret = swecl.swe_sol_eclipse_where(tjd, ifl, &g, &a, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx);
     geopos[0] = g[0];
     geopos[1] = g[1];
     for (0..20) |i| attr[i] = a[i];
     return ret;
 }
 pub export fn swe_topo_arcus_visionis(tjd: f64, g: [*]f64, datm: [*]f64, dobs: [*]f64, flag: i32, mag: f64, a1: f64, a2: f64, a3: f64, a4: f64, am: f64, ret: *f64, serr: ?[*:0]u8) callconv(.c) i32 {
-    return swehel.swe_topo_arcus_visionis(tjd, @ptrCast(g[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), flag, mag, a1, a2, a3, a4, am, ret, serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl, &g_swehel);
+    return swehel.swe_topo_arcus_visionis(tjd, @ptrCast(g[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), flag, mag, a1, a2, a3, a4, am, ret, serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx, &g_state.hctx);
 }
 pub export fn swe_vis_limit_mag(tjd: f64, g: [*]f64, datm: [*]f64, dobs: [*]f64, n: [*:0]u8, flag: i32, ret: [*]f64, serr: ?[*:0]u8) callconv(.c) i32 {
     const l = std.mem.len(n);
     var buf: [256]u8 = undefined;
     @memcpy(buf[0..l], n[0..l]);
-    return swehel.swe_vis_limit_mag(tjd, @ptrCast(g[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), buf[0..l], flag, @ptrCast(ret[0..8]), serrToZig(serr), &g_swed, g_models, &g_dctx, &g_swecl, &g_swehel);
+    return swehel.swe_vis_limit_mag(tjd, @ptrCast(g[0..3]), @ptrCast(datm[0..4]), @ptrCast(dobs[0..6]), buf[0..l], flag, @ptrCast(ret[0..8]), serrToZig(serr), &g_state.swed, g_state.models, &g_state.dctx, &g_state.cctx, &g_state.hctx);
 }
