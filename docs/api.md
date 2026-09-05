@@ -3,7 +3,9 @@
 > Exposing this over a network? Prior written permission is required —
 > see [`API-LICENSE`](../API-LICENSE) and [`license.md`](license.md).
 
-Import: `const swe = @import("swisseph");` Facade: `src/swisseph.zig:1`. All snippets below match `examples/zig-native/main.zig:1` and `readme_check.zig:1` (compiled by `zig build test`).
+Import: `const swe = @import("swisseph");` Facade: `src/swisseph.zig:1`. All
+snippets below match `examples/zig-native/main.zig:1` and `readme_check.zig:1`
+(compiled by `zig build test`).
 
 ## 0. Setup first (both APIs)
 
@@ -20,7 +22,9 @@ C (per-thread state):
 char serr[256];
 swe_set_ephe_path("/data/ephe");
 ```
-One bundle per thread; repeat setup per thread. Teardown: Zig `SweState.deinit()`, C `swe_close()` + `swe_cleanup()`. See `ref/threading-build.md`, `ref/c-zig-map.md`.
+One bundle per thread; repeat setup per thread. Teardown: Zig
+`SweState.deinit()`, C `swe_close()` + `swe_cleanup()`. See
+`ref/threading-build.md`, `ref/c-zig-map.md`.
 
 ## 1. Calendar (`swedate`, `ref/funcs-datetime.md`)
 
@@ -38,7 +42,8 @@ var xx: [6]f64 = undefined; // lon,lat,dist-AU,dLon,dLat,dDist
 const r = swe.calc_ut(jd_ut, 0, swe.sweph.SEFLG_SPEED, &xx, &swed, models, &dctx, &serr);
 if (r < 0) return error.CalcFailed; // BEYOND=-3 outside span, xx=0 — don't plot
 ```
-Bodies: `0` Sun … `22` Priapus, `40–58` fict, `10000+N` asteroids, `9000+…` moons, `-10` stars. `iflag==0` = apparent geocentric; always OR `SEFLG_SPEED`.
+Bodies: `0` Sun … `22` Priapus, `40–58` fict, `10000+N` asteroids, `9000+…`
+moons, `-10` stars. `iflag==0` = apparent geocentric; always OR `SEFLG_SPEED`.
 
 ## 3. Houses (`swehouse`, `ref/houses-A-Y.md`)
 

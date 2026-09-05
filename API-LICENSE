@@ -9,8 +9,8 @@ Term: [e.g. 12 months, auto-renew]   Territory: [worldwide / list]
 
 1. Grant. Licensor grants Licensee a non-exclusive, non-transferable right
    to expose this library (in whole or in part) over a network — REST, gRPC,
-   GraphQL, SaaS, serverless — strictly within Scope above. 
-   Prior written permission (email suffices) must be received BEFORE launch.
+   GraphQL, SaaS, serverless — strictly within Scope above. Prior written
+   permission (email suffices) must be received BEFORE launch.
 
 2. Conditions. (a) Written grant received before launch; (b) attribution
    "Swiss Ephemeris (Astrodienst AG) via swisseph-zig" in docs/status

@@ -1,6 +1,7 @@
 # Data Files — expanded layout
 
-Supersedes thin `../data-files.md`. Set path via `swe.set_ephe_path(dir)` / `swe_set_ephe_path()`; env `SE_EPHE_PATH` overrides.
+Supersedes thin `../data-files.md`. Set path via `swe.set_ephe_path(dir)` /
+`swe_set_ephe_path()`; env `SE_EPHE_PATH` overrides.
 
 ```
 $EPHE/
@@ -13,4 +14,8 @@ $EPHE/
   *.eph            # de431.eph (2.6 GB) / de406.eph for SEFLG_JPLEPH
 ```
 
-Rules: Moshier needs no files. SWIEPH without file → silent Moshier fallback + warning in `serr` — check return. `swe_get_current_file_data()` reports which file served the last call. Keep `sefstars.txt` + `seorbel.txt` in `$EPHE` root, not subdirs. Source: `https://www.astro.com/ftp/swisseph/ephe/` (+`/ast0/`…`/sat/`).
+Rules: Moshier needs no files. SWIEPH without file → silent Moshier fallback
++ warning in `serr` — check return. `swe_get_current_file_data()` reports
+which file served the last call. Keep `sefstars.txt` + `seorbel.txt` in
+`$EPHE` root, not subdirs. Source:
+`https://www.astro.com/ftp/swisseph/ephe/` (+`/ast0/`…`/sat/`).
