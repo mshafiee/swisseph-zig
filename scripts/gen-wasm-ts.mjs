@@ -56,7 +56,7 @@ export const BRIDGE_VERSION = ${versionM[1]};
 `;
 
 if (process.argv.includes('--check')) {
-    const cur = fs.existsSync(outPath) ? fs.readFileSync(outPath, 'utf8') : '';
+    const cur = fs.existsSync(outPath) ? fs.readFileSync(outPath, 'utf8').replace(/\r\n/g, '\n') : '';
     if (cur !== dts) { console.error('swe-bridge.d.ts is stale: run node scripts/gen-wasm-ts.mjs'); process.exit(1); }
     console.log('swe-bridge.d.ts in sync');
 } else {
