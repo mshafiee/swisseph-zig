@@ -1,10 +1,10 @@
 // EOP end-to-end over the VFS: a synthetic JPL file triggers load_dpsi_deps,
 // and the full loader state machine is observed via swe_eop_status().
-// JPLHOR downgrade/survival is asserted on rc flag bits (bit-exact); the
-// human-readable downgrade serr text is a known engine-level loss on the
-// JPLEPH path (swe_calc clears serr after swe_calc_ut's plaus_iflag; only
-// swecalc re-plauses, which JPL never reaches) — filed separately, the rc
-// bits prove the downgrade mechanism itself.
+// JPLHOR downgrade/survival is asserted on rc flag bits (bit-exact) only:
+// the human-readable downgrade serr text is EMPTY on both sides here, so no
+// text assertion is made. Whether that emptiness matches C is OPEN (an
+// ad-hoc C probe showed the same empty serr, but that observation is not
+// committed evidence) — the rc bits are the relied-upon contract.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -220,10 +220,10 @@ describe('eop jplhor behavior (both wasm flavors vs golden)', () => {
   });
 
   it('loaded EOP keeps JPLHOR and computes bit-exactly (nutation off)', async () => {
-    // NONUT because full JPLHOR nutation is the port's deliberate
-    // `unreachable` (swephlib.zig calc_nutation: EOP consumption not ported —
-    // the actual remaining gap). Everything else in the JPLHOR pipe runs:
+    // NONUT variant of the JPLHOR pipe: skips swi_nutation while exercising
     // open, pleph/interp over VFS, app_pos. ICRS is added by plaus, as in C.
+    // (Full-nutation coverage — i.e. the EOP applicator itself — lives in
+    // the sensitivity/boundary/constant tests above.)
     const NONUT = 64;
     const flag = JPLHOR_SPEED | NONUT;
     const rcWant = HOR_OK_RC | NONUT;

@@ -570,9 +570,9 @@ fn nut_matrix(nu: *Nut, oe: *const Eps) void {
     nu.matrix[2][2] = cospsi * sineps * sineps0 + coseps * coseps0;
 }
 
-/// sweph.c swi_check_nutation; EOP corrections not ported (see plan):
-/// the SEFLG_JPLHOR branch is guarded to be unreachable exactly like the
-/// library without a JPL file (plaus_iflag downgrades it).
+/// sweph.c swi_check_nutation; JPLHOR EOP corrections applied via the
+/// EOP daily-series view (swephlib EopView/besselEop port of the C
+/// dpsi/deps block).
 fn swi_check_nutation(tjd: f64, iflag: i32, swed: *Swed, models: AstroModels) void {
     const speedf1 = swed.nutflag & SEFLG_SPEED;
     const speedf2 = iflag & SEFLG_SPEED;
@@ -4459,6 +4459,8 @@ fn read_const(ifno: usize, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: 
 fn freePlanets(swed: *Swed) void {
     // C's free_planets memsets swed.pldat; the swemplan module keeps its own
     // cache mirrors (pdp_teval/pdp_iephe/pdp_x) that must be reset too.
+    // NOTE: segp/refep are nulled without freeing, mirroring C's memset —
+    // both sides orphan the buffers identically (vacuous agreement).
     for (&swed.pldat) |*p| {
         if (p.segp != null) p.segp = null;
         if (p.refep != null) p.refep = null;

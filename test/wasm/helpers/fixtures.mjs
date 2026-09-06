@@ -40,10 +40,11 @@ function encodeLong(v) {
 }
 
 // CRC-32/MSB-first (AUTODIN poly), bit-identical to swi_crc32 in C and Zig:
-// crc = (crc << 8) ^ table[(crc >> 24) ^ byte], init 0xFFFFFFFF, pey final ~.
-// Real .se1 files carry a correct CRC (C enforces it: damage "0n"); the port
-// skips the check (`if (false ...)`), but fixtures carry a valid CRC anyway
-// so the SAME bytes are accepted by the C oracle for message comparison.
+// crc = (crc << 8) ^ table[(crc >> 24) ^ byte], init 0xFFFFFFFF, final ~.
+// Real .se1 files carry a correct CRC and both C and the port enforce it
+// (damage "0n", verified 3/3 on dist files); fixtures stamp a valid CRC so
+// the SAME bytes exercise the pass path, with fixCrc()/bad-CRC variants
+// covering both outcomes.
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {

@@ -90,7 +90,7 @@ test:
 wasm-test:
 	@$(BUILD) swe-golden -Doptimize=Debug -Dpure=true
 	@$(BUILD) wasm-test
-	@node --test test/wasm/*.test.mjs
+	@node test/wasm/run-all.mjs
 
 lint:
 	@$(ZIG) fmt --check src/ examples/ test/
