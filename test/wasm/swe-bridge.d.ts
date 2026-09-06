@@ -46,7 +46,9 @@ export interface SweExports {
   swe_houses_armc_ex2(h: number, armc: number, geolat: number, eps: number, hsys: number, cusps: number, ascmc: number, serr: number): number;
   swe_house_pos(h: number, armc: number, geolat: number, eps: number, hsys: number, lon: number, lat: number, serr: number): number;
   swe_house_name(hsys: number): number;
+  swe_fixstar(h: number, star_ptr: number, star_len: number, tjd: number, iflag: number, xx: number, serr: number): number;
   swe_fixstar_ut(h: number, star_ptr: number, star_len: number, tjd_ut: number, iflag: number, xx: number, serr: number): number;
+  swe_fixstar2(h: number, star_ptr: number, star_len: number, tjd: number, iflag: number, xx: number, serr: number): number;
   swe_fixstar2_ut(h: number, star_ptr: number, star_len: number, tjd_ut: number, iflag: number, xx: number, serr: number): number;
   swe_fixstar_mag(h: number, star_ptr: number, star_len: number, mag: number, serr: number): number;
   swe_pheno_ut(h: number, tjd_ut: number, ipl: number, iflag: number, attr: number, serr: number): number;

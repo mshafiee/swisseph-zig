@@ -4,17 +4,16 @@
 // Browser production root for swe.wasm (wasm32-freestanding, no libc).
 //
 // Unlike src/swe_abi.zig (per-OS-thread globals mirroring C TLS statics),
-// this root is safe under worker task interleaving: ALL mutable engine state
+// this root is safe under worker task interleaving: all mutable engine state
 // lives in explicit session bundles created by swe_session_init(). A yielded
 // sweep can never be corrupted by an interleaved natal request because the
 // two tasks own different sessions; topo/sidereal for sweeps travel inside
 // SweepRequest (hermetic per call), never in shared globals.
 //
-// Session-persistence is mandatory, not optional: Swed caches open VFS
-// handles and unpacked Chebyshev segments, so a fresh context per chunk
-// would exhaust the 16-handle VFS table and re-parse records every chunk.
-// Sessions own their contexts for their whole lifetime; swe_session_free()
-// releases them (mirrors SweState.deinit + swe_close).
+// Sessions must persist across calls: Swed caches open VFS handles and
+// unpacked Chebyshev segments, so a fresh context per chunk would exhaust
+// the 16-handle VFS table and re-parse records every chunk. swe_session_free()
+// releases a session (mirrors SweState.deinit + swe_close).
 //
 // Return-code convention (mirrors C): negative = error (-1 bad handle/args,
 // -2 engine error with serr set, plus engine BEYOND codes); non-negative =
@@ -176,7 +175,7 @@ pub export fn swe_version(out_ptr: usize, out_len: usize) callconv(.c) usize {
     return n;
 }
 
-/// Stub (mirrors ABI): library path is meaningless in wasm; writes empty.
+/// Stub: library path is meaningless in wasm; writes empty string.
 pub export fn swe_get_library_path(out_ptr: usize, out_len: usize) callconv(.c) usize {
     if (out_ptr == 0 or out_len == 0) return 0;
     const dst: [*]u8 = @ptrFromInt(out_ptr);
@@ -198,7 +197,7 @@ pub export fn swe_get_planet_name(h: i32, ipl: i32, out_ptr: usize, out_len: usi
     return @intCast(n);
 }
 
-/// Stub (mirrors ABI): zeros outputs, returns 0.
+/// Stub: zeros outputs, returns 0.
 pub export fn swe_get_current_file_data(h: i32, ifno: i32, tfstart: *f64, tfend: *f64, denum: *i32) callconv(.c) i32 {
     _ = h;
     _ = ifno;
@@ -208,7 +207,7 @@ pub export fn swe_get_current_file_data(h: i32, ifno: i32, tfstart: *f64, tfend:
     return 0;
 }
 
-/// Stub (mirrors ABI): model hooks are test-only no-ops here.
+/// Stub: model hooks are test-only no-ops here.
 pub export fn swe_get_astro_models(samod_ptr: usize, samod_len: usize, sdet_ptr: usize, sdet_len: usize, iflag: i32) callconv(.c) void {
     _ = iflag;
     if (samod_ptr != 0 and samod_len > 0) @as([*]u8, @ptrFromInt(samod_ptr))[0] = 0;
@@ -416,188 +415,121 @@ pub export fn swe_calc_pctr(h: i32, tjd: f64, ipl: i32, iplctr: i32, iflag_in: i
 // ---------------------------------------------------------------------------
 // longitude crossings (iterative, session state)
 // ---------------------------------------------------------------------------
-pub export fn swe_solcross(h: i32, x2cross: f64, jd_et: f64, flag_in: i32, serr: [*]u8) callconv(.c) f64 {
-    const s = sessionOf(h) orelse return std.math.nan(f64);
+fn bodyCross(s: *Session, ipl: i32, x2cross: f64, jd0: f64, comptime use_ut: bool, flag_in: i32, serr: [*]u8) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, 0, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
-    const xlp: f64 = 360.0 / 365.24;
+    const calc0 = if (use_ut) sweph.swe_calc_ut else sweph.swe_calc;
+    if (calc0(jd0, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd0 - 1;
+    const xlp: f64 = if (ipl == 0) 360.0 / 365.24 else 360.0 / 27.32;
     var dist = swephlib.swe_degnorm(x2cross - x[0]);
-    var jd = jd_et + dist / xlp;
+    var jd = jd0 + dist / xlp;
     while (true) {
-        if (sweph.swe_calc(jd, 0, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
+        if (calc0(jd, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd0 - 1;
         dist = swephlib.swe_difdeg2n(x2cross, x[0]);
         jd += dist / x[3];
         if (@abs(dist) < CROSS_PRECISION) break;
     }
     return jd;
+}
+
+pub export fn swe_solcross(h: i32, x2cross: f64, jd_et: f64, flag_in: i32, serr: [*]u8) callconv(.c) f64 {
+    const s = sessionOf(h) orelse return std.math.nan(f64);
+    return bodyCross(s, 0, x2cross, jd_et, false, flag_in, serr);
 }
 
 pub export fn swe_solcross_ut(h: i32, x2cross: f64, jd_ut: f64, flag_in: i32, serr: [*]u8) callconv(.c) f64 {
     const s = sessionOf(h) orelse return std.math.nan(f64);
-    const flag = flag_in | sweph.SEFLG_SPEED;
-    var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, 0, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-    const xlp: f64 = 360.0 / 365.24;
-    var dist = swephlib.swe_degnorm(x2cross - x[0]);
-    var jd = jd_ut + dist / xlp;
-    while (true) {
-        if (sweph.swe_calc_ut(jd, 0, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-        dist = swephlib.swe_difdeg2n(x2cross, x[0]);
-        jd += dist / x[3];
-        if (@abs(dist) < CROSS_PRECISION) break;
-    }
-    return jd;
+    return bodyCross(s, 0, x2cross, jd_ut, true, flag_in, serr);
 }
 
 pub export fn swe_mooncross(h: i32, x2cross: f64, jd_et: f64, flag_in: i32, serr: [*]u8) callconv(.c) f64 {
     const s = sessionOf(h) orelse return std.math.nan(f64);
-    const flag = flag_in | sweph.SEFLG_SPEED;
-    var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
-    const xlp: f64 = 360.0 / 27.32;
-    var dist = swephlib.swe_degnorm(x2cross - x[0]);
-    var jd = jd_et + dist / xlp;
-    while (true) {
-        if (sweph.swe_calc(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
-        dist = swephlib.swe_difdeg2n(x2cross, x[0]);
-        jd += dist / x[3];
-        if (@abs(dist) < CROSS_PRECISION) break;
-    }
-    return jd;
+    return bodyCross(s, 1, x2cross, jd_et, false, flag_in, serr);
 }
 
 pub export fn swe_mooncross_ut(h: i32, x2cross: f64, jd_ut: f64, flag_in: i32, serr: [*]u8) callconv(.c) f64 {
     const s = sessionOf(h) orelse return std.math.nan(f64);
+    return bodyCross(s, 1, x2cross, jd_ut, true, flag_in, serr);
+}
+
+fn moonNodeCross(s: *Session, jd0: f64, comptime use_ut: bool, flag_in: i32, xlon: *f64, xlat: *f64, serr: [*]u8) f64 {
     const flag = flag_in | sweph.SEFLG_SPEED;
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-    const xlp: f64 = 360.0 / 27.32;
-    var dist = swephlib.swe_degnorm(x2cross - x[0]);
-    var jd = jd_ut + dist / xlp;
+    const calc0 = if (use_ut) sweph.swe_calc_ut else sweph.swe_calc;
+    if (calc0(jd0, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd0 - 1;
+    const xlat0 = x[1];
+    var jd = jd0 + 1;
     while (true) {
-        if (sweph.swe_calc_ut(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-        dist = swephlib.swe_difdeg2n(x2cross, x[0]);
-        jd += dist / x[3];
-        if (@abs(dist) < CROSS_PRECISION) break;
+        if (calc0(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd0 - 1;
+        if ((x[1] >= 0 and xlat0 < 0) or (x[1] < 0 and xlat0 > 0)) break;
+        jd += 1;
+    }
+    var dist = x[1];
+    while (true) {
+        jd -= dist / x[4];
+        if (calc0(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd0 - 1;
+        dist = x[1];
+        if (@abs(dist) < CROSS_PRECISION) {
+            xlon.* = x[0];
+            xlat.* = x[1];
+            break;
+        }
     }
     return jd;
 }
 
 pub export fn swe_mooncross_node(h: i32, jd_et: f64, flag_in: i32, xlon: *f64, xlat: *f64, serr: [*]u8) callconv(.c) f64 {
     const s = sessionOf(h) orelse return std.math.nan(f64);
-    const flag = flag_in | sweph.SEFLG_SPEED;
-    var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
-    const xlat0 = x[1];
-    var jd = jd_et + 1;
-    while (true) {
-        if (sweph.swe_calc(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
-        if ((x[1] >= 0 and xlat0 < 0) or (x[1] < 0 and xlat0 > 0)) break;
-        jd += 1;
-    }
-    var dist = x[1];
-    while (true) {
-        jd -= dist / x[4];
-        if (sweph.swe_calc(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_et - 1;
-        dist = x[1];
-        if (@abs(dist) < CROSS_PRECISION) {
-            xlon.* = x[0];
-            xlat.* = x[1];
-            break;
-        }
-    }
-    return jd;
+    return moonNodeCross(s, jd_et, false, flag_in, xlon, xlat, serr);
 }
 
 pub export fn swe_mooncross_node_ut(h: i32, jd_ut: f64, flag_in: i32, xlon: *f64, xlat: *f64, serr: [*]u8) callconv(.c) f64 {
     const s = sessionOf(h) orelse return std.math.nan(f64);
-    const flag = flag_in | sweph.SEFLG_SPEED;
+    return moonNodeCross(s, jd_ut, true, flag_in, xlon, xlat, serr);
+}
+
+fn helioCross(s: *Session, ipl: i32, x2cross: f64, jd0: f64, comptime use_ut: bool, iflag_in: i32, dir: i32, jd_cross: *f64, serr: [*]u8) i32 {
+    const flag = iflag_in | sweph.SEFLG_SPEED | sweph.SEFLG_HELCTR;
+    if (ipl == 0 or ipl == 1 or (ipl >= 10 and ipl <= 13) or (ipl >= 21 and ipl < 23)) {
+        const msg = "swe_helio_cross: not possible for this object";
+        const n = @min(msg.len, AS_MAXCH - 1);
+        @memcpy(serr[0..n], msg[0..n]);
+        serr[n] = 0;
+        return -1;
+    }
     var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-    const xlat0 = x[1];
-    var jd = jd_ut + 1;
-    while (true) {
-        if (sweph.swe_calc_ut(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-        if ((x[1] >= 0 and xlat0 < 0) or (x[1] < 0 and xlat0 > 0)) break;
-        jd += 1;
+    const calc0 = if (use_ut) sweph.swe_calc_ut else sweph.swe_calc;
+    if (calc0(jd0, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return -1;
+    var xlp = x[3];
+    if (ipl == 15) xlp = 0.01971;
+    var dist = swephlib.swe_degnorm(x2cross - x[0]);
+    var jd: f64 = undefined;
+    if (dir >= 0) jd = jd0 + dist / xlp else {
+        dist = 360.0 - dist;
+        jd = jd0 - dist / xlp;
     }
-    var dist = x[1];
     while (true) {
-        jd -= dist / x[4];
-        if (sweph.swe_calc_ut(jd, 1, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return jd_ut - 1;
-        dist = x[1];
-        if (@abs(dist) < CROSS_PRECISION) {
-            xlon.* = x[0];
-            xlat.* = x[1];
-            break;
-        }
+        if (calc0(jd, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return -1;
+        dist = swephlib.swe_difdeg2n(x2cross, x[0]);
+        jd += dist / x[3];
+        if (@abs(dist) < CROSS_PRECISION) break;
     }
-    return jd;
+    jd_cross.* = jd;
+    return 0;
 }
 
 pub export fn swe_helio_cross(h: i32, ipl: i32, x2cross: f64, jd_et: f64, iflag_in: i32, dir: i32, jd_cross: *f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
-    const flag = iflag_in | sweph.SEFLG_SPEED | sweph.SEFLG_HELCTR;
-    if (ipl == 0 or ipl == 1 or (ipl >= 10 and ipl <= 13) or (ipl >= 21 and ipl < 23)) {
-        const msg = "swe_helio_cross: not possible for this object";
-        const n = @min(msg.len, AS_MAXCH - 1);
-        @memcpy(serr[0..n], msg[0..n]);
-        serr[n] = 0;
-        return -1;
-    }
-    var x: [6]f64 = undefined;
-    if (sweph.swe_calc(jd_et, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return -1;
-    var xlp = x[3];
-    if (ipl == 15) xlp = 0.01971;
-    var dist = swephlib.swe_degnorm(x2cross - x[0]);
-    var jd: f64 = undefined;
-    if (dir >= 0) jd = jd_et + dist / xlp else {
-        dist = 360.0 - dist;
-        jd = jd_et - dist / xlp;
-    }
-    while (true) {
-        if (sweph.swe_calc(jd, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return -1;
-        dist = swephlib.swe_difdeg2n(x2cross, x[0]);
-        jd += dist / x[3];
-        if (@abs(dist) < CROSS_PRECISION) break;
-    }
-    jd_cross.* = jd;
-    return 0;
+    return helioCross(s, ipl, x2cross, jd_et, false, iflag_in, dir, jd_cross, serr);
 }
 
 pub export fn swe_helio_cross_ut(h: i32, ipl: i32, x2cross: f64, jd_ut: f64, iflag_in: i32, dir: i32, jd_cross: *f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
-    const flag = iflag_in | sweph.SEFLG_SPEED | sweph.SEFLG_HELCTR;
-    if (ipl == 0 or ipl == 1 or (ipl >= 10 and ipl <= 13) or (ipl >= 21 and ipl < 23)) {
-        const msg = "swe_helio_cross: not possible for this object";
-        const n = @min(msg.len, AS_MAXCH - 1);
-        @memcpy(serr[0..n], msg[0..n]);
-        serr[n] = 0;
-        return -1;
-    }
-    var x: [6]f64 = undefined;
-    if (sweph.swe_calc_ut(jd_ut, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return -1;
-    var xlp = x[3];
-    if (ipl == 15) xlp = 0.01971;
-    var dist = swephlib.swe_degnorm(x2cross - x[0]);
-    var jd: f64 = undefined;
-    if (dir >= 0) jd = jd_ut + dist / xlp else {
-        dist = 360.0 - dist;
-        jd = jd_ut - dist / xlp;
-    }
-    while (true) {
-        if (sweph.swe_calc_ut(jd, ipl, flag, &x, &s.swed, s.models, &s.dctx, serrToZig(serr)) < 0) return -1;
-        dist = swephlib.swe_difdeg2n(x2cross, x[0]);
-        jd += dist / x[3];
-        if (@abs(dist) < CROSS_PRECISION) break;
-    }
-    jd_cross.* = jd;
-    return 0;
+    return helioCross(s, ipl, x2cross, jd_ut, true, iflag_in, dir, jd_cross, serr);
 }
 
-/// swisseph-zig cleanup equivalent: frees per-session heap resources but
-/// keeps the session usable (mirrors swe_cleanup thread semantics).
+/// swisseph-zig swe_cleanup equivalent: frees per-session heap resources
+/// but keeps the session usable.
 pub export fn swe_cleanup(h: i32) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
     sessionCleanup(s);
@@ -766,26 +698,35 @@ fn starWriteback(star_ptr: usize, buf: *[512]u8) void {
     dst[slen] = 0;
 }
 
-pub export fn swe_fixstar_ut(h: i32, star_ptr: usize, star_len: usize, tjd_ut: f64, iflag: i32, xx: [*]f64, serr: [*]u8) callconv(.c) i32 {
-    const s = sessionOf(h) orelse return -1;
+fn starCalc(s: *Session, star_ptr: usize, star_len: usize, tjd: f64, iflag: i32, xx: [*]f64, serr: [*]u8, comptime use_ut: bool, comptime use_v2: bool) i32 {
     var sb: [512]u8 = undefined;
     const star = starBuf(star_ptr, star_len, &sb) orelse return -1;
     var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar_ut(star, tjd_ut, iflag, &out, &s.swed, s.models, &s.dctx, serrToZig(serr));
+    const f = if (use_v2) (if (use_ut) sweph.swe_fixstar2_ut else sweph.swe_fixstar2) else (if (use_ut) sweph.swe_fixstar_ut else sweph.swe_fixstar);
+    const ret = f(star, tjd, iflag, &out, &s.swed, s.models, &s.dctx, serrToZig(serr));
     for (0..6) |i| xx[i] = out[i];
     starWriteback(star_ptr, &sb);
     return ret;
 }
 
+pub export fn swe_fixstar(h: i32, star_ptr: usize, star_len: usize, tjd: f64, iflag: i32, xx: [*]f64, serr: [*]u8) callconv(.c) i32 {
+    const s = sessionOf(h) orelse return -1;
+    return starCalc(s, star_ptr, star_len, tjd, iflag, xx, serr, false, false);
+}
+
+pub export fn swe_fixstar_ut(h: i32, star_ptr: usize, star_len: usize, tjd_ut: f64, iflag: i32, xx: [*]f64, serr: [*]u8) callconv(.c) i32 {
+    const s = sessionOf(h) orelse return -1;
+    return starCalc(s, star_ptr, star_len, tjd_ut, iflag, xx, serr, true, false);
+}
+
+pub export fn swe_fixstar2(h: i32, star_ptr: usize, star_len: usize, tjd: f64, iflag: i32, xx: [*]f64, serr: [*]u8) callconv(.c) i32 {
+    const s = sessionOf(h) orelse return -1;
+    return starCalc(s, star_ptr, star_len, tjd, iflag, xx, serr, false, true);
+}
+
 pub export fn swe_fixstar2_ut(h: i32, star_ptr: usize, star_len: usize, tjd_ut: f64, iflag: i32, xx: [*]f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
-    var sb: [512]u8 = undefined;
-    const star = starBuf(star_ptr, star_len, &sb) orelse return -1;
-    var out: [6]f64 = undefined;
-    const ret = sweph.swe_fixstar2_ut(star, tjd_ut, iflag, &out, &s.swed, s.models, &s.dctx, serrToZig(serr));
-    for (0..6) |i| xx[i] = out[i];
-    starWriteback(star_ptr, &sb);
-    return ret;
+    return starCalc(s, star_ptr, star_len, tjd_ut, iflag, xx, serr, true, true);
 }
 
 pub export fn swe_fixstar_mag(h: i32, star_ptr: usize, star_len: usize, mag: *f64, serr: [*]u8) callconv(.c) i32 {
@@ -1054,7 +995,7 @@ pub export fn swe_cs2degstr(t: i32, out_ptr: usize, out_len: usize) callconv(.c)
 }
 
 // ---------------------------------------------------------------------------
-// calendar conversions (pure swedate wrappers)
+// calendar conversions (leap-second aware UTC <-> JD)
 // ---------------------------------------------------------------------------
 pub export fn swe_revjul(jd: f64, gregflag: i32, jyear: *i32, jmon: *i32, jday: *i32, jut: *f64) callconv(.c) void {
     const r = swedate.swe_revjul(jd, gregflag);
@@ -1775,7 +1716,6 @@ pub export fn swe_lun_occult_where(h: i32, tjd: f64, ipl: i32, star_ptr: usize, 
         @memcpy(sb[0..n], src[0..n]);
         sb[n] = 0;
         star = sb[0..n];
-        if (n == 0 or sb[0] == 0) star = null;
     }
     var g: [2]f64 = undefined;
     var ab: [20]f64 = undefined;
@@ -1827,7 +1767,7 @@ pub export fn swe_lun_eclipse_how(h: i32, tjd_ut: f64, ifl: i32, has_geo: i32, g
 
 pub export fn swe_lun_eclipse_when_loc(h: i32, tjd: f64, ifl: i32, glon: f64, glat: f64, galt: f64, tret: [*]f64, attr: [*]f64, backward: i32, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
-    // Mirrors ABI: altitude forced to 0 (geocentric-latitude convention).
+    // swe_abi passes altitude 0 here (geocentric-latitude convention).
     _ = galt;
     var geo: [3]f64 = .{ glon, glat, 0 };
     var tb: [10]f64 = undefined;
@@ -1847,18 +1787,31 @@ fn helObj(obj_ptr: usize, obj_len: usize, buf: *[256]u8) ?[]u8 {
     const src: [*]const u8 = @ptrFromInt(obj_ptr);
     @memcpy(buf[0..n], src[0..n]);
     buf[n] = 0;
+    if (buf[0] == 0) return null; // empty name
     return buf[0..n];
+}
+
+const HelParams = struct {
+    geo: [3]f64,
+    datm: [4]f64,
+    dobs: [6]f64,
+};
+
+fn helParams(glon: f64, glat: f64, galt: f64, pr: f64, te: f64, hu: f64, vr: f64, age: f64, snellen: f64, bino: f64, scope_mag: f64, scope_trans: f64, opt_flag: f64) HelParams {
+    return .{
+        .geo = .{ glon, glat, galt },
+        .datm = .{ pr, te, hu, vr },
+        .dobs = .{ age, snellen, bino, scope_mag, scope_trans, opt_flag },
+    };
 }
 
 pub export fn swe_heliacal_ut(h: i32, tjd: f64, glon: f64, glat: f64, galt: f64, pr: f64, te: f64, hu: f64, vr: f64, age: f64, snellen: f64, bino: f64, scope_mag: f64, scope_trans: f64, opt_flag: f64, obj_ptr: usize, obj_len: usize, evt: i32, helflag: i32, dret: [*]f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
     var ob: [256]u8 = undefined;
     const obj = helObj(obj_ptr, obj_len, &ob) orelse return -1;
-    var geo: [3]f64 = .{ glon, glat, galt };
-    var datm: [4]f64 = .{ pr, te, hu, vr };
-    var dobs: [6]f64 = .{ age, snellen, bino, scope_mag, scope_trans, opt_flag };
+    var p = helParams(glon, glat, galt, pr, te, hu, vr, age, snellen, bino, scope_mag, scope_trans, opt_flag);
     var db: [10]f64 = undefined;
-    const ret = swehel.swe_heliacal_ut(tjd, &geo, &datm, &dobs, obj, evt, helflag, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
+    const ret = swehel.swe_heliacal_ut(tjd, &p.geo, &p.datm, &p.dobs, obj, evt, helflag, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
     for (0..10) |i| dret[i] = db[i];
     return ret;
 }
@@ -1867,11 +1820,9 @@ pub export fn swe_heliacal_pheno_ut(h: i32, tjd_ut: f64, glon: f64, glat: f64, g
     const s = sessionOf(h) orelse return -1;
     var ob: [256]u8 = undefined;
     const obj = helObj(obj_ptr, obj_len, &ob) orelse return -1;
-    var geo: [3]f64 = .{ glon, glat, galt };
-    var datm: [4]f64 = .{ pr, te, hu, vr };
-    var dobs: [6]f64 = .{ age, snellen, bino, scope_mag, scope_trans, opt_flag };
+    var p = helParams(glon, glat, galt, pr, te, hu, vr, age, snellen, bino, scope_mag, scope_trans, opt_flag);
     var db: [40]f64 = undefined;
-    const ret = swehel.swe_heliacal_pheno_ut(tjd_ut, &geo, &datm, &dobs, obj, evt, helflag, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
+    const ret = swehel.swe_heliacal_pheno_ut(tjd_ut, &p.geo, &p.datm, &p.dobs, obj, evt, helflag, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
     for (0..40) |i| darr[i] = db[i];
     return ret;
 }
@@ -1880,35 +1831,29 @@ pub export fn swe_vis_limit_mag(h: i32, tjd: f64, glon: f64, glat: f64, galt: f6
     const s = sessionOf(h) orelse return -1;
     var ob: [256]u8 = undefined;
     const obj = helObj(obj_ptr, obj_len, &ob) orelse return -1;
-    var geo: [3]f64 = .{ glon, glat, galt };
-    var datm: [4]f64 = .{ pr, te, hu, vr };
-    var dobs: [6]f64 = .{ age, snellen, bino, scope_mag, scope_trans, opt_flag };
+    var p = helParams(glon, glat, galt, pr, te, hu, vr, age, snellen, bino, scope_mag, scope_trans, opt_flag);
     var db: [8]f64 = undefined;
-    const ret = swehel.swe_vis_limit_mag(tjd, &geo, &datm, &dobs, obj, helflag, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
+    const ret = swehel.swe_vis_limit_mag(tjd, &p.geo, &p.datm, &p.dobs, obj, helflag, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
     for (0..8) |i| dret[i] = db[i];
     return ret;
 }
 
 pub export fn swe_heliacal_angle(h: i32, tjd: f64, glon: f64, glat: f64, galt: f64, pr: f64, te: f64, hu: f64, vr: f64, age: f64, snellen: f64, bino: f64, scope_mag: f64, scope_trans: f64, opt_flag: f64, helflag: i32, mag: f64, azi_obj: f64, azi_sun: f64, azi_moon: f64, alt_moon: f64, dret: [*]f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
-    var geo: [3]f64 = .{ glon, glat, galt };
-    var datm: [4]f64 = .{ pr, te, hu, vr };
-    var dobs: [6]f64 = .{ age, snellen, bino, scope_mag, scope_trans, opt_flag };
+    var p = helParams(glon, glat, galt, pr, te, hu, vr, age, snellen, bino, scope_mag, scope_trans, opt_flag);
     var db: [3]f64 = undefined;
-    const ret = swehel.swe_heliacal_angle(tjd, &geo, &datm, &dobs, helflag, mag, azi_obj, azi_sun, azi_moon, alt_moon, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
+    const ret = swehel.swe_heliacal_angle(tjd, &p.geo, &p.datm, &p.dobs, helflag, mag, azi_obj, azi_sun, azi_moon, alt_moon, &db, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
     for (0..3) |i| dret[i] = db[i];
     return ret;
 }
 
 pub export fn swe_topo_arcus_visionis(h: i32, tjd: f64, glon: f64, glat: f64, galt: f64, pr: f64, te: f64, hu: f64, vr: f64, age: f64, snellen: f64, bino: f64, scope_mag: f64, scope_trans: f64, opt_flag: f64, helflag: i32, mag: f64, a1: f64, a2: f64, a3: f64, a4: f64, am: f64, ret_out: *f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
-    var geo: [3]f64 = .{ glon, glat, galt };
-    var datm: [4]f64 = .{ pr, te, hu, vr };
-    var dobs: [6]f64 = .{ age, snellen, bino, scope_mag, scope_trans, opt_flag };
-    return swehel.swe_topo_arcus_visionis(tjd, &geo, &datm, &dobs, helflag, mag, a1, a2, a3, a4, am, ret_out, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
+    var p = helParams(glon, glat, galt, pr, te, hu, vr, age, snellen, bino, scope_mag, scope_trans, opt_flag);
+    return swehel.swe_topo_arcus_visionis(tjd, &p.geo, &p.datm, &p.dobs, helflag, mag, a1, a2, a3, a4, am, ret_out, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx, &s.hctx);
 }
 
-/// Stub (mirrors ABI): ayanamsha table lives outside the ported subset.
+/// Stub: ayanamsha table lives outside the ported subset.
 pub export fn swe_get_ayanamsa_name(out_ptr: usize, out_len: usize) callconv(.c) usize {
     const v = "Fagan/Bradley";
     if (out_ptr == 0 or out_len == 0) return 0;
