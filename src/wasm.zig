@@ -91,6 +91,22 @@ fn sessionCleanup(s: *Session) void {
     if (s.swed.fixstar_buf.len > 0) {
         sweph.fsAlloc(&s.swed).free(s.swed.fixstar_buf);
     }
+    // Parsed Chebyshev segments (pldat segp/refep) are heap buffers that
+    // swe_close() only memsets away, mirroring C's process-lifetime leak.
+    // Worker sessions churn, so free them here — otherwise every
+    // init/calc/free cycle leaks ~0.5KB and wasm pages grow unboundedly.
+    // Native path untouched (unobservable there either way).
+    const ha = vfs.heapAllocator();
+    for (&s.swed.pldat) |*p| {
+        if (p.segp) |b| {
+            ha.free(b);
+            p.segp = null;
+        }
+        if (p.refep) |b| {
+            ha.free(b);
+            p.refep = null;
+        }
+    }
     sweph.swe_close(&s.swed);
     s.swed.fixstar_buf = &[_]sweph.FixedStar{};
     s.swed.fixed_stars = &[_]sweph.FixedStar{};
