@@ -497,10 +497,9 @@ describe('production bridge (swe.wasm session API)', () => {
       assert.ok(st >= 0 && st < 24);
       const st0 = e.swe_sidtime0(h, JD_J2000, 23.4393, 0);
       assert.ok(st0 >= 0 && st0 < 24);
-      // tidal set/get
+      // tidal set/get round-trip
       assert.equal(e.swe_set_tid_acc(h, -25.936), 0);
-      const ta = new DataView(e.memory.buffer).getFloat64((e.swe_get_tid_acc(h), (() => { const p = e.swe_wasm_alloc(8); return p; })()), true);
-      swe.exports.swe_wasm_free(ta, 8);
+      assert.equal(e.swe_get_tid_acc(h), -25.936);
       assert.equal(e.swe_set_tid_acc(h, 999999), 0); // reset to auto
     } finally {
       swe.exports.swe_session_free(h);

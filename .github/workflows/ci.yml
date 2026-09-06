@@ -65,4 +65,6 @@ jobs:
         run: |
           zig build swe-golden -Doptimize=Debug -Dpure=true
           zig build wasm-test
+          zig build wasm
+          node scripts/gen-wasm-ts.mjs --check
           node test/wasm/run-all.mjs
