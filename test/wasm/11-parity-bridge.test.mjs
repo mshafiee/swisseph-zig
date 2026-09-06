@@ -1,5 +1,18 @@
 // Bridge parity: replay C-oracle corpora through the production swe.wasm
-// session API, bit-exact (==) against the oracle's %.17g values.
+// session API and compare against the oracle's %.17g values.
+//
+// Tolerance contract (units of the compared vector: deg, deg/day, mag,
+// days): vectors must agree within BRIDGE_PARITY_TOL (default 1e-4);
+// rc flags and serr strings stay bit-exact. Rationale: Apple libm is not
+// correctly rounded (asin/acos/atan/atan2/pow), so no correctly-rounded
+// pure-Zig port can ever match it bit-for-bit — measured per-function
+// (200k samples each): sin/cos/tan/exp/log/log10/fmod are bit-exact vs
+// platform libm, the rest diverge 1-8 ulp. Native stays bit-exact through
+// the dlsym shim (zig-difftest gates); wasm owns the tolerance contract.
+// Full-corpus survey (production ReleaseFast wasm): global max diff
+// 1.36e-5 (a Moshier speed element), everything else <= 1.8e-6 — every
+// over-tolerance line verified a member of the pure-native failure set,
+// i.e. the harness contributes zero divergence.
 //
 // Corpora live in the companion verify repo (../swisseph-zig-verify/corpora)
 // with the real ephemeris files in ../swisseph/ephe. The whole run is
@@ -23,11 +36,14 @@
 //
 // §era-files: the engine builds deterministic era filenames per
 // swi_gen_filename (sepl_18.se1 for the modern era, seplm30.se1-style
-// "m" files outside it). needFiles() replicates that math exactly, so the
-// VFS holds precisely what the oracle's full ../ephe dir provided. The VFS
-// caps at 16 files, so the context evicts + re-registers on era change
-// (swap count is asserted small) with a fresh session each time — open
-// file handles cached in session state must never outlive a clear.
+// "m" files outside it). needFiles() replicates that math exactly, and
+// each kind pre-registers its COMPLETE file set up front (the VFS holds
+// 64 files: a 12-era working set is 36), so the engine runs zero swaps
+// with history evolving exactly like the oracle's single-process run.
+// Mid-run eviction+reset is a correctness hazard (discarded call history
+// — e.g. the first SWIEPH calc after a reset misses pre-reset Moshier
+// state and the Sun shifts 0.0036 deg), which is why the cap was raised
+// from 16: pre-register falls back to lazy ensureFiles only past 64.
 //
 // §history: oracle values embed single-process call history (open files
 // feeding deltat denums, workspace caches — e.g. an apogee line matches
@@ -205,14 +221,14 @@ function makeCtx(swe) {
       applySnapshot();
     },
     // Register the COMPLETE kind file-set up front (when it fits the
-    // 16-file VFS): zero swaps/resets, so engine history evolves exactly
+    // 64-file VFS): zero swaps/resets, so engine history evolves exactly
     // like the C oracle's single-process run. Must be called before any
     // state lines are applied (snapshot empty). Extra texts (e.g. sefstars
     // for rise stars) passed explicitly; returns false when the union
-    // overflows 16 (caller falls back to lazy ensureFiles).
+    // overflows 64 (caller falls back to lazy ensureFiles).
     preRegister(all, texts = []) {
       const union = [...new Set([...PINNED_PROBE, ...texts, ...all])].filter((n) => readEphe(n) !== null);
-      if (union.length > 16) return false;
+      if (union.length > 64) return false;
       swe.exports.swe_session_free(session);
       swe.exports.swe_vfs_clear();
       registered = new Set();
@@ -250,6 +266,50 @@ function collectKindFiles(lines, extract) {
   return [...set];
 }
 
+// Pure-math divergence survey/gate (see header §tolerance contract).
+// Every compare records its max abs diff into TOLSURV and fails only past
+// TOL. BRIDGE_PARITY_TOL=0 recovers near-bit-exactness (only -0/+0 passes);
+// larger values double as divergence surveys.
+const TOL = process.env.BRIDGE_PARITY_TOL === undefined ? 1e-4 : Number(process.env.BRIDGE_PARITY_TOL);
+const TOLSURV = {};
+function eqVec(got, want, kind, diag, what) {
+  const sv = (TOLSURV[kind] ??= { n: 0, nonzero: 0, max: 0, maxline: '' });
+  assert.equal(got.length, want.length, `${what} length mismatch ${diag}`);
+  let max = 0;
+  let wk = -1;
+  for (let k = 0; k < got.length; k++) {
+    const d = Math.abs(got[k] - want[k]);
+    if (got[k] !== want[k] && !(d <= max)) {
+      max = d;
+      wk = k;
+    }
+  }
+  sv.n++;
+  if (max > 0 || got.some((v, k) => !Object.is(v, want[k]))) sv.nonzero++;
+  if (!(max <= sv.max)) {
+    sv.max = max;
+    sv.maxline = `${diag} k=${wk}`;
+  }
+  if (!(max <= TOL)) {
+    assert.fail(`${what} mismatch ${diag} maxdiff=${max} k=${wk} got=${got[wk]} want=${want[wk]}`);
+  }
+}
+
+// Scalar twin of eqVec for geolon/geolat/tret/daya/cusps (same survey).
+function eqNum(got, want, kind, diag, what) {
+  const sv = (TOLSURV[kind] ??= { n: 0, nonzero: 0, max: 0, maxline: '' });
+  sv.n++;
+  const d = Math.abs(got - want);
+  if (got !== want) sv.nonzero++;
+  if (!(d <= sv.max)) {
+    sv.max = d;
+    sv.maxline = `${diag} ${what}`;
+  }
+  if (!(d <= TOL)) {
+    assert.fail(`${what} mismatch ${diag} maxdiff=${d} got=${got} want=${want}`);
+  }
+}
+
 // Soft assert collector: records per-line mismatches and continues, so one
 // run yields the full inventory (compared against the pure-native failure
 // set to separate harness issues from pure-math divergence). The test
@@ -263,6 +323,10 @@ function soft(failures, label, fn) {
 }
 
 function reportFailures(failures, what) {
+  if (TOLSURV[what]) {
+    const sv = TOLSURV[what];
+    console.log(`${what}: tol-survey n=${sv.n} nonzero=${sv.nonzero} maxdiff=${sv.max} at ${sv.maxline}`);
+  }
   if (failures.length > 0) {
     const cap = parseInt(process.env.BRIDGE_PARITY_DUMP ?? '20', 10);
     console.log(`${what}: ${failures.length} mismatches (first ${cap}):\n` + failures.slice(0, cap).join('\n'));
@@ -316,6 +380,11 @@ describe('bridge parity vs C-oracle corpora', () => {
     const ctx = makeCtx(swe);
     try {
       const lines = await readCorpus('swecalc_corpus.txt');
+      const pre = ctx.preRegister(collectKindFiles(lines, (line) => {
+        const m = line.match(/^U (\d+) (\S+) (\d+) ->/);
+        return m ? { jd: Number(m[2]), ipl: Number(m[1]), iflag: Number(m[3]) } : null;
+      }));
+      console.log(`swecalc: pre-registered=${pre}`);
       const sampleSet = new Set(deterministicSample(SAMPLE_PER_KIND, lines.length));
       const xx = swe.allocF64(6);
       const se = serrBuf(swe);
@@ -340,7 +409,7 @@ describe('bridge parity vs C-oracle corpora', () => {
           soft(failures, diag, () => {
             assert.equal(gotRc, rc, `rc mismatch ${diag}: ${lines[i]}`);
             if (rc >= 0 && want.length === 6) {
-              assert.deepEqual(swe.readF64(xx, 6), want, `xx mismatch ${diag}`);
+              eqVec(swe.readF64(xx, 6), want, 'swecalc', diag, 'xx');
             }
             assert.equal(normGot(se), wantSerr, `serr mismatch ${diag}`);
           });
@@ -398,7 +467,7 @@ describe('bridge parity vs C-oracle corpora', () => {
           soft(failures, diag, () => {
             assert.equal(gotRc, rc, `rc mismatch ${diag}: ${line}`);
             if (rc >= 0 && want.length === 6) {
-              assert.deepEqual(swe.readF64(xx, 6), want, `xx mismatch ${diag}`);
+              eqVec(swe.readF64(xx, 6), want, 'topo', diag, 'xx');
             }
             assert.equal(normGot(se), wantSerr, `serr mismatch ${diag}`);
           });
@@ -464,7 +533,7 @@ describe('bridge parity vs C-oracle corpora', () => {
           soft(failures, diag, () => {
             assert.equal(gotRc, rc, `rc mismatch ${diag}: ${line}`);
             if (rc >= 0) {
-              assert.deepEqual(swe.readF64(attr, want.length), want, `attr mismatch ${diag}`);
+              eqVec(swe.readF64(attr, want.length), want, 'pheno', diag, 'attr');
             }
             assert.equal(normGot(se), wantSerr, `serr mismatch ${diag}`);
           });
@@ -514,11 +583,11 @@ describe('bridge parity vs C-oracle corpora', () => {
             assert.equal(gotRc, rc, `rc mismatch ${diag}: ${lines[i]}`);
             if (rc >= 0) {
               const gp = swe.readF64(geopos, 2);
-              assert.equal(gp[0], want[0], `geolon ${diag}`);
-              assert.equal(gp[1], want[1], `geolat ${diag}`);
+              eqNum(gp[0], want[0], 'ecl', diag, 'geolon');
+              eqNum(gp[1], want[1], 'ecl', diag, 'geolat');
               const nAttr = want.length - 2;
               if (nAttr > 0) {
-                assert.deepEqual(swe.readF64(attr, nAttr), want.slice(2), `attr ${diag}`);
+                eqVec(swe.readF64(attr, nAttr), want.slice(2), 'ecl', diag, 'attr');
               }
             }
             assert.equal(normGot(se), wantSerr, `serr mismatch ${diag}`);
@@ -596,7 +665,7 @@ describe('bridge parity vs C-oracle corpora', () => {
           soft(failures, diag, () => {
             assert.equal(gotRc, rc, `rc mismatch ${diag}: ${line}`);
             if (rc >= 0 && wantTret !== null) {
-              assert.equal(new DataView(swe.exports.memory.buffer).getFloat64(tret, true), wantTret, `tret ${diag}`);
+              eqNum(new DataView(swe.exports.memory.buffer).getFloat64(tret, true), wantTret, 'rise', diag, 'tret');
             }
             assert.equal(normGot(se), wantSerr, `serr ${diag}`);
           });
@@ -668,7 +737,7 @@ describe('bridge parity vs C-oracle corpora', () => {
             soft(failures, diag, () => {
               assert.equal(gotRc, rc, `rc mismatch ${diag}: ${line}`);
               if (rc >= 0) {
-                assert.equal(new DataView(swe.exports.memory.buffer).getFloat64(daya, true), want, `daya mismatch ${diag}`);
+                eqNum(new DataView(swe.exports.memory.buffer).getFloat64(daya, true), want, 'sid', diag, 'daya');
               }
               assert.equal(normGot(se), wantSerr, `serr mismatch ${diag}`);
             });
@@ -694,7 +763,7 @@ describe('bridge parity vs C-oracle corpora', () => {
             soft(failures, fdiag, () => {
               assert.equal(gotRc, rc, `rc mismatch ${fdiag}: ${line}`);
               if (rc >= 0 && want.length === 6) {
-                assert.deepEqual(swe.readF64(xx, 6), want, `xx mismatch ${fdiag}`);
+                eqVec(swe.readF64(xx, 6), want, 'sid', fdiag, 'xx');
               }
               assert.equal(normGot(se), wantSerr, `serr mismatch ${fdiag}`);
             });
@@ -796,11 +865,11 @@ describe('bridge parity vs C-oracle corpora', () => {
             const gotA = swe.readF64(ascmc, 10);
             for (let c = 0; c <= 12; c++) {
               const w = want[`c${c}`];
-              if (w !== undefined) assert.equal(gotC[c], w, `cusp c${c} ${diag}`);
+              if (w !== undefined) eqNum(gotC[c], w, 'house', diag, `cusp c${c}`);
             }
             for (let a = 0; a <= 9; a++) {
               const w = want[`a${a}`];
-              if (w !== undefined) assert.equal(gotA[a], w, `ascmc a${a} ${diag}`);
+              if (w !== undefined) eqNum(gotA[a], w, 'house', diag, `ascmc a${a}`);
             }
             assert.equal(normGot(se), wantSerr, `serr ${diag}`);
           });

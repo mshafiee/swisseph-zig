@@ -56,3 +56,17 @@ if (!ok) {
   console.error(combined.trimEnd().split('\n').slice(-15).join('\n'));
   process.exit(1);
 }
+// 11-parity-bridge runs separately (not count-pinned): it self-skips when
+// the companion corpora/ephe checkout is absent (CI) and asserts the full
+// tolerance gate when present. Exit code is the signal either way.
+const bridge = spawnSync(process.execPath, ['--test', 'test/wasm/11-parity-bridge.test.mjs'], {
+  cwd: ROOT,
+  encoding: 'utf8',
+  maxBuffer: 64 * 1024 * 1024,
+});
+process.stdout.write(bridge.stdout ?? '');
+process.stderr.write(bridge.stderr ?? '');
+if (bridge.status !== 0) {
+  console.error(`run-all: 11-parity-bridge failed (exit=${bridge.status})`);
+  process.exit(1);
+}

@@ -105,7 +105,7 @@ describe('vfs allocator (both wasm flavors)', () => {
     for (const name of ['freestanding', 'wasi']) {
       const swe = flavors[name];
       swe.exports.swe_vfs_clear();
-      for (let i = 0; i < 16; i++) registerFile(swe, `f${i}.bin`, Buffer.from([i]));
+      for (let i = 0; i < 64; i++) registerFile(swe, `f${i}.bin`, Buffer.from([i]));
       const nb = Buffer.from('overflow.bin', 'latin1');
       const np = swe.alloc(nb.length);
       const dp = swe.alloc(1);

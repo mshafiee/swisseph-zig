@@ -21,8 +21,17 @@ const builtin = @import("builtin");
 
 const is_wasm = builtin.target.cpu.arch.isWasm();
 
-pub const MAX_FILES = 16;
-pub const MAX_HANDLES = 16;
+pub const MAX_FILES = 64;
+pub const MAX_HANDLES = 64;
+// 64 slots: a 12-era working set (sepl/semo/seas per era = 36 files)
+// plus probe/text/asteroid singles fits with headroom, so multi-era
+// sessions never need eviction mid-run. Eviction mid-run is a
+// correctness hazard, not just an inconvenience: engine caches
+// (planetary state, delta-T denum, obliquity structs) evolve with call
+// history, and a session reset discards them — e.g. the first SWIEPH
+// calc after a reset misses pre-reset Moshier state and the Sun shifts
+// by 0.0036 deg (bridge swecalc line 15). Static cost is ~17KB metadata;
+// file bytes are only allocated for what hosts register.
 pub const MAX_NAME = 256; // matches sweph.AS_MAXCH
 
 const FileEntry = struct {
