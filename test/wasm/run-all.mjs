@@ -33,8 +33,11 @@ if (child.error) {
   console.error(`run-all: spawn failed: ${child.error.message}`);
   process.exit(2);
 }
+// TAP summary markers differ by node version (`# tests 66` vs `ℹ tests 66`)
+// and by stream (stdout vs stderr): parse leniently over both.
+const combined = (child.stdout ?? '') + '\n' + (child.stderr ?? '');
 const pick = (name) => {
-  const m = (child.stdout ?? '').match(new RegExp(`^# ${name} (\\d+)$`, 'm'));
+  const m = combined.match(new RegExp(`^[#\\u2139]\\s*${name}\\s+(\\d+)\\s*$`, 'm'));
   return m ? Number(m[1]) : null;
 };
 const got = { tests: pick('tests'), pass: pick('pass'), fail: pick('fail') };
@@ -48,5 +51,7 @@ if (!ok) {
     `run-all: expected tests=${EXPECTED.tests} pass=${EXPECTED.pass} fail=${EXPECTED.fail}` +
       ` but got tests=${got.tests} pass=${got.pass} fail=${got.fail} (exit=${child.status})`,
   );
+  console.error('run-all: output tail:');
+  console.error(combined.trimEnd().split('\n').slice(-15).join('\n'));
   process.exit(1);
 }
