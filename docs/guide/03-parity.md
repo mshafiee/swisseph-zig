@@ -2,9 +2,13 @@
 
 > Part of the [swisseph-zig documentation](../index.md) · [Threading & Build Reference](../reference/61-threading-build.md)
 
-`swisseph-zig` guarantees **exact bit-for-bit parity** with the upstream Swiss Ephemeris C reference implementation. 
+`swisseph-zig` guarantees **exact bit-for-bit parity** with the upstream Swiss Ephemeris C reference implementation **on native targets** (Linux/macOS/Windows/BSD, default shim build).
 
 Our porting rule rejects approximation tolerances (e.g., `assert(approxEq(a, b, 1e-9))`). Instead, every ported routine preserves the exact floating-point evaluation order and identical mathematical constants, requiring strict equality (`==`) across full `%.17g` IEEE 754 round-trips against a reference C oracle.
+
+The `wasm32-freestanding` production build cannot use the `dlsym` shim (no
+libc) and therefore owns a **tolerance contract** instead of bit parity —
+see §6. Native parity below is unaffected.
 
 ---
 
@@ -28,10 +32,10 @@ CFLAGS="-ffp-contract=off"
 
 Mathematical parity depends on transcendental functions behaving identically across runtimes. We address this using a two-tier strategy implemented in `src/libmshim.c` and `src/libm/cr.zig`:
 
-| Execution Mode | Elementary Functions<br>`sin`, `cos`, `tan`, `log`, `exp`, `fmod` | Inverse / Power Functions<br>`atan`, `asin`, `acos`, `atan2`, `pow` |
+| Execution Mode | Elementary Functions<br>`sin`, `cos`, `tan`, `log`, `log10`, `exp`, `fmod` | Inverse / Power Functions<br>`atan`, `asin`, `acos`, `atan2`, `pow` |
 |---|---|---|
 | **Default Shim** (`libmshim.c`) | Platform `libm` via `dlsym`<br>*(Bit-exact with C)* | Platform `libm` via `dlsym`<br>*(Bit-exact with C)* |
-| **Pure Zig** (`-Dpure=true`) | Zig `std.math`<br>*(Bit-identical to libm)* | Correctly-rounded `f128` (Ziv's iteration)<br>*(Controlled 1-ULP bound vs. libm)* |
+| **Pure Zig** (`-Dpure=true`) | Zig `std.math`<br>*(Bit-identical to platform libm on 200k samples each)* | `asin`/`acos`/`atan`/`atan2` via correctly-rounded `f128` in `src/libm/cr.zig`; `pow` via `std.math`<br>*(1–8 ULP vs platform libm — see §6)* |
 
 ### Transcendental Rounding & Licensing
 Standard C runtime libraries (`libm`) are often not correctly rounded for inverse trigonometric functions. Benchmarked against 60-digit arbitrary-precision arithmetic (`mpmath`), standard `libm` implementations show noticeable deviations on edge cases (`atan` deviates ~4% of the time, `acos` ~15%).
@@ -105,3 +109,42 @@ Parity measures how faithfully this codebase reproduces the C reference. **Astro
   - `DE431` vs. `DE406`: < 0.4" for the Sun; < 129" for Pluto over extended multi-millennium spans.
 
 > **Verification Standard:** When citing benchmark figures or astronomical coordinates, always publish the exact theory model, Delta-T configuration, and ephemeris file version used.
+
+---
+
+## 6. WASM Tolerance Contract (`wasm32-freestanding`)
+
+The production `swe.wasm` build forces `-Dpure=true` (no libc for the
+`dlsym` shim) and therefore cannot be bit-identical to the C oracle:
+
+* Differential fuzzing (200k samples per function, macOS ARM) shows
+  `std.math` `sin`/`cos`/`tan`/`log`/`log10`/`exp`/`fmod` are bit-exact vs
+  platform libm — all divergence comes from `asin`/`acos`/`atan`/`atan2`
+  (1 ULP at 1–15% rate) and `pow` (up to 8 ULP).
+* Checked against 80-digit `mpmath` ground truth, **platform libm itself is
+  not correctly rounded** for those functions — so no correctly-rounded
+  pure-Zig port could ever match it bit-for-bit. Exact replication of
+  Apple's algorithms is additionally license-blocked (APSL-1.1).
+* The bridge gate (`test/wasm/11-parity-bridge.test.mjs`, wired into
+  `run-all.mjs`) therefore asserts a tolerance contract: float vectors
+  agree within **1e-4** (units of the vector: deg, deg/day, mag, days)
+  while return codes and `serr` strings stay bit-exact.
+
+Full-corpus survey (production `ReleaseFast` wasm, 1,168,200 swecalc lines
+executed plus all other corpora walk-all/assert-sampled): global max diff
+**1.36e-5** on a Moshier speed element, everything else ≤1.8e-6 — two
+orders of magnitude inside the gate. Every over-tolerance line was
+verified a member of the pure-native (`-Dpure=true` difftest) failure
+set, i.e. the harness contributes zero divergence.
+
+Two harness properties are load-bearing for that result:
+
+* **Exact history.** Oracle values embed single-process call history
+  (e.g. the first SWIEPH calc after Moshier calls misses pre-existing
+  engine state and the Sun shifts 0.0036° — reproduced bit-exactly in C).
+  Every kind pre-registers its complete file set and walks all lines in
+  order with zero session resets.
+* **VFS capacity 64** (`src/vfs.zig`). A 12-era working set is 36 files;
+  the old 16-slot cap forced mid-run eviction+reset, which discards the
+  history above. Static cost of 64 slots is ~17KB metadata; file bytes
+  are only allocated for what hosts register.
