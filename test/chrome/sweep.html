@@ -1,0 +1,116 @@
+<!doctype html>
+<!-- Headless-Chrome sweep gate (see test/chrome/run.mjs).
+     Self-contained: fetches ../wasm/swe.wasm, runs the interleaved
+     sweep/natal integrity core from 12-sweep-gates plus an absolute
+     anchor check, then reports SWE-RESULT JSON in <title> and <body>. -->
+<meta charset="utf-8">
+<title>SWE-RUNNING</title>
+<body><pre id="out">running…</pre></body>
+<script type="module">
+const JD = 2451545.0, MOSEPH = 4, SPEED = 256;
+const TOPOCTR = 32 * 1024, SIDEREAL = 64 * 1024;
+const LAHIRI = 1, KRISHNAMURTI = 5;
+// Moshier Sun @J2000 longitude anchor (node-measured, 1e-12 gate below).
+const ANCHOR_LON = 280.36891967534336;
+const res = { checks: [], pass: true };
+function check(name, cond, extra = '') {
+  res.checks.push({ name, ok: !!cond, extra: String(extra).slice(0, 160) });
+  if (!cond) res.pass = false;
+}
+let W = null; // exports
+let MEM = null; // Uint8Array view (refreshed after any growth)
+function mem8() { return new Uint8Array(W.memory.buffer); }
+function memDV() { return new DataView(W.memory.buffer); }
+function alloc(n) { const p = W.swe_wasm_alloc(n); if (!p) throw new Error('alloc failed'); return p; }
+function readF64(ptr, n) {
+  const dv = memDV(), out = new Array(n);
+  for (let i = 0; i < n; i++) out[i] = dv.getFloat64(ptr + i * 8, true);
+  return out;
+}
+function bitsEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false;
+  return true;
+}
+function writeReq(req, o) {
+  const dv = memDV();
+  dv.setFloat64(req, o.start, true);
+  dv.setFloat64(req + 8, o.step, true);
+  dv.setUint32(req + 16, o.steps, true);
+  dv.setUint32(req + 20, o.mask, true);
+  dv.setInt32(req + 24, o.flags, true);
+  dv.setUint8(req + 28, o.topo ? 1 : 0);
+  if (o.topo) for (let i = 0; i < 3; i++) dv.setFloat64(req + 32 + i * 8, o.topo[i], true);
+  dv.setUint8(req + 56, o.sid ? 1 : 0);
+  if (o.sid) {
+    dv.setInt32(req + 64, o.sid[0], true);
+    dv.setFloat64(req + 72, o.sid[1], true);
+    dv.setFloat64(req + 80, o.sid[2], true);
+  }
+}
+function calcUt(h, jd, ipl, iflag) {
+  const xx = alloc(48), se = alloc(256);
+  mem8().fill(0, se, se + 256);
+  const rc = W.swe_calc_ut(h, jd, ipl, iflag, xx, se);
+  const v = readF64(xx, 6);
+  W.swe_wasm_free(xx, 48); W.swe_wasm_free(se, 256);
+  return { rc, v };
+}
+function sweep(h, o) {
+  const nb = 32 - Math.clz32(o.mask) > 0 ? [...Array(32).keys()].filter((i) => o.mask & (1 << i)).length : 0;
+  const n = o.steps * nb * 6;
+  const req = alloc(88), out = alloc(n * 8), se = alloc(256);
+  mem8().fill(0, se, se + 256);
+  writeReq(req, o);
+  const rc = W.swe_calc_sweep(h, req, out, n, se);
+  const v = readF64(out, n);
+  W.swe_wasm_free(req, 88); W.swe_wasm_free(out, n * 8); W.swe_wasm_free(se, 256);
+  return { rc, v, n };
+}
+try {
+  const bytes = await (await fetch('swe.wasm')).arrayBuffer();
+  check('wasm fetches', bytes.byteLength > 1_000_000, bytes.byteLength + ' bytes');
+  ({ instance: { exports: W } } = await WebAssembly.instantiate(bytes, {}));
+  check('instantiates with zero imports', !!W.swe_calc_sweep);
+  // Full body twice: the wasm bump/freelist allocator grows in coarse
+  // chunks per new request size on first use (node shows the same
+  // one-time steps then flat). Pass 1 warms every size class; pass 2 is
+  // measured — pages must not move between them.
+  let pages0 = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    const live = pass === 1;
+    if (pass === 1) pages0 = W.memory.buffer.byteLength;
+  const S = W.swe_session_init(), N = W.swe_session_init();
+  const S2 = W.swe_session_init(), N2 = W.swe_session_init();
+  if (live) check('4 sessions init', S >= 0 && N >= 0 && S2 >= 0 && N2 >= 0);
+  const anchor = calcUt(S, JD, 0, MOSEPH).v;
+  if (live) check('anchor Sun lon', Math.abs(anchor[0] - ANCHOR_LON) <= 1e-12, anchor[0]);
+  // Interleaved chunks + conflicting natal (mirrors 12-sweep-gates).
+  const flags = MOSEPH | SPEED | TOPOCTR | SIDEREAL;
+  const req = { start: JD, step: 1, steps: 12, mask: 0b11111, flags, topo: [8.5, 47.4, 400], sid: [LAHIRI, 0, 0] };
+  const A = sweep(S, { ...req, steps: 5 });
+  W.swe_set_topo(N, -70.7, -33.5, 500);
+  W.swe_set_sid_mode(N, KRISHNAMURTI, 0, 0);
+  const jds = [JD + 2, JD + 7, JD + 30];
+  const nat = jds.map((jd) => calcUt(N, jd, 1, flags).v);
+  const B = sweep(S, { ...req, start: JD + 5, steps: 7 });
+  const ref = sweep(S2, req);
+  W.swe_set_topo(N2, -70.7, -33.5, 500);
+  W.swe_set_sid_mode(N2, KRISHNAMURTI, 0, 0);
+  const refNat = jds.map((jd) => calcUt(N2, jd, 1, flags).v);
+  if (live) check('chunk rc', A.rc === 5 * 5 * 6 && B.rc === 7 * 5 * 6 && ref.rc === 12 * 5 * 6, `${A.rc}/${B.rc}/${ref.rc}`);
+  if (live) check('chunked == one-shot (bits)', bitsEqual([...A.v, ...B.v], ref.v));
+  if (live) check('natal == isolated (bits)', nat.every((v, i) => bitsEqual(v, refNat[i])));
+  const geo = calcUt(N2, JD, 1, MOSEPH | SPEED).v;
+  if (live) check('sweep is topocentric', !bitsEqual(ref.v.slice(6, 12), geo));
+  if (live) check('natal conflicts with sweep topo', !bitsEqual(nat[0], ref.v.slice(5 * 6 * 2 + 6, 5 * 6 * 2 + 12)));
+  for (const h of [S, N, S2, N2]) W.swe_session_free(h);
+  if (live) check('pages stable', W.memory.buffer.byteLength === pages0, `${pages0} -> ${W.memory.buffer.byteLength}`);
+  }
+} catch (e) {
+  check('no exception', false, (e && e.stack) || String(e));
+}
+const line = 'SWE-RESULT ' + JSON.stringify(res);
+document.title = line;
+document.getElementById('out').textContent = line;
+</script>

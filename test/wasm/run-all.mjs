@@ -71,3 +71,16 @@ if (bridge.status !== 0) {
   console.error(`run-all: 11-parity-bridge failed (exit=${bridge.status})`);
   process.exit(1);
 }
+// Headless-Chrome sweep gate: self-skips when no Chrome binary exists;
+// otherwise asserts the interleave/anchor/pages checks under V8.
+const chromeGate = spawnSync(process.execPath, ['test/chrome/run.mjs'], {
+  cwd: ROOT,
+  encoding: 'utf8',
+  maxBuffer: 64 * 1024 * 1024,
+});
+process.stdout.write(chromeGate.stdout ?? '');
+process.stderr.write(chromeGate.stderr ?? '');
+if (chromeGate.status !== 0) {
+  console.error(`run-all: chrome gate failed (exit=${chromeGate.status})`);
+  process.exit(1);
+}
