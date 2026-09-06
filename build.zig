@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) void {
     // leaves
     const swedate = mkmod(b, build_options, "swedate", "src/swedate.zig", target, optimize);
     const deltat = mkmod(b, build_options, "deltat", "src/deltat.zig", target, optimize);
+    const vfs_mod = mkmod(b, build_options, "vfs", "src/vfs.zig", target, optimize);
     // foundation
     const swephlib = mkmod(b, build_options, "swephlib", "src/swephlib.zig", target, optimize);
     // ephemeris
@@ -48,10 +49,13 @@ pub fn build(b: *std.Build) void {
     swemmoon.addImport("swephlib", swephlib);
     swemplan.addImport("swephlib", swephlib);
     swemplan.addImport("sweph", sweph);
+    swemplan.addImport("vfs", vfs_mod);
     swejpl.addImport("swephlib", swephlib);
     swejpl.addImport("sweph", sweph);
+    swejpl.addImport("vfs", vfs_mod);
     // engine: sweph → everything below
     sweph.addImport("swephlib", swephlib);
+    sweph.addImport("vfs", vfs_mod);
     sweph.addImport("deltat", deltat);
     sweph.addImport("swemmoon", swemmoon);
     sweph.addImport("swemplan", swemplan);
@@ -87,6 +91,7 @@ pub fn build(b: *std.Build) void {
     swe_abi.addImport("swehouse", swehouse);
     swe_abi.addImport("swemplan", swemplan);
     swe_abi.addImport("swejpl", swejpl);
+    swe_abi.addImport("vfs", vfs_mod);
     if (isShimOK and !pure) {
         swe_abi.addCSourceFile(.{ .file = b.path("src/libmshim.c"), .flags = &.{} });
     }
@@ -189,6 +194,8 @@ pub fn build(b: *std.Build) void {
         thr_mod.addImport("swemplan", swemplan);
         thr_mod.addImport("swejpl", swejpl);
         thr_mod.addImport("swe_abi", swe_abi);
+        // test_thread_safety.zig file-imports swe_abi.zig, which now needs vfs
+        thr_mod.addImport("vfs", vfs_mod);
         thr_mod.link_libc = true;
         const thr_tests = b.addTest(.{ .root_module = thr_mod });
         test_step.dependOn(&b.addRunArtifact(thr_tests).step);
@@ -264,5 +271,98 @@ pub fn build(b: *std.Build) void {
         dt_mod.link_libc = true;
         const difftest = b.addExecutable(.{ .name = "zig-difftest", .root_module = dt_mod });
         b.installArtifact(difftest);
+
+        // swe-golden: native golden-vector dumper for test/wasm/ (prints u64
+        // hex bits of swe_calc_ut results; build pure to match wasm math:
+        // `zig build swe-golden -Dpure=true`).
+        const golden_mod = b.createModule(.{ .root_source_file = b.path("test/wasm/golden.zig"), .target = target, .optimize = optimize });
+        golden_mod.addImport("swe_abi", swe_abi);
+        golden_mod.link_libc = true;
+        const golden_exe = b.addExecutable(.{ .name = "swe-golden", .root_module = golden_mod });
+        const golden_step = b.step("swe-golden", "build the native golden vector dumper for test/wasm/");
+        golden_step.dependOn(&b.addInstallArtifact(golden_exe, .{ .dest_dir = .{ .override = .{ .custom = "wasm-test" } } }).step);
+
+        // ── WASM test artifacts (host-built, for the test/wasm/ Node harness) ──
+        // Two runnable .wasm binaries exposing the swe_abi surface plus the
+        // swe_wasm_alloc/free staging helpers: freestanding exercises the
+        // browser path (no libc, VFS required) and wasi is the control group
+        // (bundled libc, real filesystem).
+        const wasm_step = b.step("wasm-test", "build runnable wasm test artifacts for test/wasm/");
+        const wasm_opts = b.addOptions();
+        wasm_opts.addOption(bool, "pure", true);
+        wasm_opts.addOption(bool, "is_wasm", true);
+
+        const wasm_targets = [_]struct {
+            name: []const u8,
+            query: std.Target.Query,
+            link_libc: bool,
+        }{
+            .{ .name = "swe-test-freestanding", .query = .{ .cpu_arch = .wasm32, .os_tag = .freestanding }, .link_libc = false },
+            .{ .name = "swe-test-wasi", .query = .{ .cpu_arch = .wasm32, .os_tag = .wasi }, .link_libc = true },
+        };
+        for (wasm_targets) |wt| {
+            const wtarget = b.resolveTargetQuery(wt.query);
+            // Mirror of the host module graph with wasm target (w- prefix to
+            // avoid module-name collisions with the host graph above).
+            const wswedate = mkmod(b, wasm_opts, "w-swedate", "src/swedate.zig", wtarget, .ReleaseSmall);
+            const wdeltat = mkmod(b, wasm_opts, "w-deltat", "src/deltat.zig", wtarget, .ReleaseSmall);
+            const wvfs = mkmod(b, wasm_opts, "w-vfs", "src/vfs.zig", wtarget, .ReleaseSmall);
+            const wswephlib = mkmod(b, wasm_opts, "w-swephlib", "src/swephlib.zig", wtarget, .ReleaseSmall);
+            const wswemmoon = mkmod(b, wasm_opts, "w-swemmoon", "src/swemmoon.zig", wtarget, .ReleaseSmall);
+            const wswemplan = mkmod(b, wasm_opts, "w-swemplan", "src/swemplan.zig", wtarget, .ReleaseSmall);
+            const wswejpl = mkmod(b, wasm_opts, "w-swejpl", "src/swejpl.zig", wtarget, .ReleaseSmall);
+            const wsweph = mkmod(b, wasm_opts, "w-sweph", "src/sweph.zig", wtarget, .ReleaseSmall);
+            const wswecl = mkmod(b, wasm_opts, "w-swecl", "src/swecl.zig", wtarget, .ReleaseSmall);
+            const wswehouse = mkmod(b, wasm_opts, "w-swehouse", "src/swehouse.zig", wtarget, .ReleaseSmall);
+            const wswehel = mkmod(b, wasm_opts, "w-swehel", "src/swehel.zig", wtarget, .ReleaseSmall);
+            wdeltat.addImport("swephlib", wswephlib);
+            wswephlib.addImport("deltat", wdeltat);
+            wswephlib.addImport("swedate", wswedate);
+            wswemmoon.addImport("swephlib", wswephlib);
+            wswemplan.addImport("swephlib", wswephlib);
+            wswemplan.addImport("sweph", wsweph);
+            wswemplan.addImport("vfs", wvfs);
+            wswejpl.addImport("swephlib", wswephlib);
+            wswejpl.addImport("sweph", wsweph);
+            wswejpl.addImport("vfs", wvfs);
+            wsweph.addImport("swephlib", wswephlib);
+            wsweph.addImport("vfs", wvfs);
+            wsweph.addImport("deltat", wdeltat);
+            wsweph.addImport("swemmoon", wswemmoon);
+            wsweph.addImport("swemplan", wswemplan);
+            wsweph.addImport("swejpl", wswejpl);
+            wsweph.addImport("swehouse", wswehouse);
+            wswecl.addImport("sweph", wsweph);
+            wswecl.addImport("swephlib", wswephlib);
+            wswecl.addImport("deltat", wdeltat);
+            wswecl.addImport("swemmoon", wswemmoon);
+            wswecl.addImport("swehouse", wswehouse);
+            wswehouse.addImport("swephlib", wswephlib);
+            wswehel.addImport("sweph", wsweph);
+            wswehel.addImport("swecl", wswecl);
+            wswehel.addImport("swephlib", wswephlib);
+            wswehel.addImport("deltat", wdeltat);
+            wswehel.addImport("swedate", wswedate);
+            const wswe_abi = mkmod(b, wasm_opts, "w-swe_abi", "src/swe_abi.zig", wtarget, .ReleaseSmall);
+            wswe_abi.addImport("sweph", wsweph);
+            wswe_abi.addImport("swephlib", wswephlib);
+            wswe_abi.addImport("deltat", wdeltat);
+            wswe_abi.addImport("swedate", wswedate);
+            wswe_abi.addImport("swecl", wswecl);
+            wswe_abi.addImport("swehouse", wswehouse);
+            wswe_abi.addImport("swehel", wswehel);
+            wswe_abi.addImport("swemplan", wswemplan);
+            wswe_abi.addImport("swejpl", wswejpl);
+            wswe_abi.addImport("vfs", wvfs);
+            // The exe root IS swe_abi. rdynamic retains the full C-ABI surface
+            // (+ swe_wasm_alloc staging helpers) in the .wasm: with entry
+            // disabled, ReleaseSmall would otherwise GC unreferenced exports.
+            if (wt.link_libc) wswe_abi.link_libc = true;
+            const wexe = b.addExecutable(.{ .name = wt.name, .root_module = wswe_abi });
+            wexe.entry = .disabled;
+            wexe.rdynamic = true;
+            const winstall = b.addInstallArtifact(wexe, .{ .dest_dir = .{ .override = .{ .custom = "wasm-test" } } });
+            wasm_step.dependOn(&winstall.step);
+        }
     }
 }

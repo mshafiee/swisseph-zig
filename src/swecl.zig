@@ -2732,7 +2732,7 @@ pub fn swe_gauquelin_sector(
         dctx.jpldenum = swed.jpldenum;
         t_et = t_ut + deltat_mod.swe_deltat_ex(dctx, t_ut, iflag);
         eps = lib.swi_epsiln(t_et, iflag, models) * RADTODEG;
-        _ = lib.swi_nutation(t_et, iflag, &nutlo, models, nutInterp(swed));
+        _ = lib.swi_nutation(t_et, iflag, &nutlo, models, nutInterp(swed), sweph.eopViewOf(swed));
         nutlo[0] *= RADTODEG;
         nutlo[1] *= RADTODEG;
         armc = lib.swe_degnorm(lib.swe_sidtime0(t_ut, eps + nutlo[1], nutlo[0], models, dctx, nutInterp(swed)) * 15 + geopos[0]);

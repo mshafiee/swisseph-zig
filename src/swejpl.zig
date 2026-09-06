@@ -72,30 +72,31 @@ pub const JplCtx = struct {
     ncoeffs: i32 = 0,
 };
 
+const vfs = @import("vfs");
 const is_wasm = @import("builtin").target.cpu.arch.isWasm();
 fn fread(ptr: [*]u8, size: usize, nitems: usize, stream: ?*anyopaque) usize {
-    if (is_wasm) return 0;
+    if (is_wasm) return vfs.fread(ptr, size, nitems, stream);
     const c = struct {
         extern "c" fn fread(ptr: [*]u8, size: usize, nitems: usize, stream: ?*anyopaque) usize;
     };
     return c.fread(ptr, size, nitems, stream);
 }
 fn fseek(stream: ?*anyopaque, off: i64, whence: i32) i32 {
-    if (is_wasm) return -1;
+    if (is_wasm) return vfs.fseek(stream, off, whence);
     const c = struct {
         extern "c" fn fseek(stream: ?*anyopaque, off: i64, whence: i32) i32;
     };
     return c.fseek(stream, off, whence);
 }
 fn ftell(stream: ?*anyopaque) i64 {
-    if (is_wasm) return -1;
+    if (is_wasm) return vfs.ftell(stream);
     const c = struct {
         extern "c" fn ftell(stream: ?*anyopaque) i64;
     };
     return c.ftell(stream);
 }
 fn fclose(stream: ?*anyopaque) i32 {
-    if (is_wasm) return 0;
+    if (is_wasm) return vfs.fclose(stream);
     const c = struct {
         extern "c" fn fclose(stream: ?*anyopaque) i32;
     };
@@ -193,6 +194,9 @@ fn fsizer(serr: ?[]u8, swed: *sweph.Swed) i32 {
             khi = @intCast(i + 1);
         }
     }
+    // All-zero pointer table (C OOB read at ipt[-3]): no usable bodies.
+    if (khi == 0)
+        return NOT_AVAILABLE;
     var nd: i32 = 0;
     if (khi == 12)
         nd = 2
@@ -330,7 +334,12 @@ fn interp(buf: []const f64, t: f64, intv: f64, ncfin: i32, ncmin: i32, nain: i32
     else
         dt1 = -@floor(-t);
     temp = na * t;
-    ni = @intFromFloat(temp - dt1);
+    // Corrupt-na / stray-t guard (C UB on OOB sub-interval): clamp into the
+    // valid sub-interval range. Valid files never trigger this (t is
+    // segment-normalized, na validated at open).
+    const ni_max: f64 = @floatFromInt(@max(nain, 1) - 1);
+    const ni_f = temp - dt1;
+    ni = if (!std.math.isFinite(ni_f)) 0 else @intFromFloat(@min(@max(ni_f, 0.0), ni_max));
     // tc is the normalized chebyshev time (-1 <= tc <= 1)
     tc = (@mod(temp, 1.0) + dt1) * 2.0 - 1.0;
     // check to see whether chebyshev time has changed,
@@ -498,8 +507,13 @@ fn state(et: f64, list: ?[]i32, do_bary: bool, pv: ?[]f64, pvsun: ?[]f64, nut: ?
         // is file length correct?
         _ = fseek(swed.jpl.js.jplfptr, 0, 2); // SEEK_END
         flen = ftell(swed.jpl.js.jplfptr);
-        // # of segments in file
-        nseg = @intFromFloat((swed.jpl.js.eh_ss[1] - swed.jpl.js.eh_ss[0]) / swed.jpl.js.eh_ss[2]);
+        // # of segments in file; corrupt ss[2]==0 makes this non-finite
+        // (C UB: (int)inf) — fail the open like C's observable mutilated
+        // error instead of panicking.
+        const nseg_f = (swed.jpl.js.eh_ss[1] - swed.jpl.js.eh_ss[0]) / swed.jpl.js.eh_ss[2];
+        if (!std.math.isFinite(nseg_f) or nseg_f > 2147483647 or nseg_f < -2147483648)
+            return NOT_AVAILABLE;
+        nseg = @intFromFloat(nseg_f);
         // sum of all cheby coeffs of all planets and segments
         nb = 0;
         for (0..13) |i| {
@@ -549,6 +563,50 @@ fn state(et: f64, list: ?[]i32, do_bary: bool, pv: ?[]f64, pvsun: ?[]f64, nut: ?
             }
             return NOT_AVAILABLE;
         }
+        // Corrupt-table guard (C UB on OOB interp reads past the record).
+        // Runs after C's own checks so nb/length semantics are untouched:
+        // every really-read region must be absent (normalized to zeros) or
+        // fit the record with ctx-sized counts. Valid JPL files always
+        // satisfy this; without it, corrupt pointers panic (Debug) or read
+        // out of bounds. Component factor k mirrors the nb accounting
+        // (k=2 for the nutation table at i==11, 3 for 3-comp bodies);
+        // ipt[36..38] (librations, filled from lpt above) use k=3.
+        // Body 12's file triple is overwritten by lpt and never read.
+        for (0..12) |i| {
+            const st = ipt[i * 3];
+            const nc = ipt[i * 3 + 1];
+            const ni_ = ipt[i * 3 + 2];
+            if (st <= 0 or nc <= 0 or ni_ <= 0) {
+                ipt[i * 3] = 0;
+                ipt[i * 3 + 1] = 0;
+                ipt[i * 3 + 2] = 0;
+                continue;
+            }
+            if (nc > 18)
+                return NOT_AVAILABLE;
+            var k: i64 = 3;
+            if (i == 11)
+                k = 2;
+            const end: i64 = @as(i64, st - 1) + k * @as(i64, nc) * @as(i64, ni_);
+            if (end > @as(i64, swed.jpl.ncoeffs))
+                return NOT_AVAILABLE;
+        }
+        {
+            const st = ipt[36];
+            const nc = ipt[37];
+            const ni_ = ipt[38];
+            if (st <= 0 or nc <= 0 or ni_ <= 0) {
+                ipt[36] = 0;
+                ipt[37] = 0;
+                ipt[38] = 0;
+            } else {
+                if (nc > 18)
+                    return NOT_AVAILABLE;
+                const end: i64 = @as(i64, st - 1) + 3 * @as(i64, nc) * @as(i64, ni_);
+                if (end > @as(i64, swed.jpl.ncoeffs))
+                    return NOT_AVAILABLE;
+            }
+        }
     }
     if (list == null)
         return 0;
@@ -564,7 +622,9 @@ fn state(et: f64, list: ?[]i32, do_bary: bool, pv: ?[]f64, pvsun: ?[]f64, nut: ?
         }
         return BEYOND_EPH_LIMITS;
     }
-    // calculate record # and relative time in interval
+    // calculate record # and relative time in interval. Safe by
+    // construction: et is range-checked above and ss[2] passed the open-time
+    // nseg finiteness check, so |(et-ss[0])/ss[2]| <= |nseg|+1 (i32 range).
     nr = @as(i32, @intFromFloat((et_mn - swed.jpl.js.eh_ss[0]) / swed.jpl.js.eh_ss[2])) + 2;
     if (et_mn == swed.jpl.js.eh_ss[1])
         nr -= 1; // end point of ephemeris, use last record
@@ -601,14 +661,20 @@ fn state(et: f64, list: ?[]i32, do_bary: bool, pv: ?[]f64, pvsun: ?[]f64, nut: ?
     }
     const pv_arr = pv.?;
     const pvsun_arr = pvsun.?;
-    // interpolate ssbary sun
+    // interpolate ssbary sun; absent sun entry (C OOB read) fails the
+    // computation so callers fall back gracefully instead of panicking.
+    if (ipt[30] <= 0)
+        return NOT_AVAILABLE;
     interp(buf[@intCast(ipt[30] - 1)..], t, intv, ipt[31], 3, ipt[32], 2, pvsun_arr, &swed.jpl);
     for (0..6) |i| {
         pvsun_arr[i] *= aufac;
     }
-    // check and interpolate whichever bodies are requested
+    // check and interpolate whichever bodies are requested; absent table
+    // entries (C OOB read) fail the computation for graceful fallback.
     for (0..10) |i| {
         if (list.?[i] > 0) {
+            if (ipt[i * 3] <= 0)
+                return NOT_AVAILABLE;
             interp(buf[@intCast(ipt[i * 3] - 1)..], t, intv, ipt[i * 3 + 1], 3, ipt[i * 3 + 2], list.?[i], pv_arr[i * 6 ..], &swed.jpl);
             for (0..6) |j| {
                 if (i < 9 and !do_bary) {

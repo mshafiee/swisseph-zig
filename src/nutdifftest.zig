@@ -12,6 +12,7 @@
 const std = @import("std");
 const lib = @import("swephlib");
 const deltat = @import("deltat");
+const sweph = @import("sweph");
 
 const swe_shim_sin = lib.swe_shim_sin;
 const swe_shim_cos = lib.swe_shim_cos;
@@ -35,6 +36,31 @@ fn parseInt(s: ?[]const u8) ?i32 {
 
 var dctx = deltat.DeltatCtx{};
 
+// Real EOP tables for EB lines (verify-repo nut_eop corpus): loaded once
+// from the ../ephe convention shared with the C oracles (verify root CWD),
+// via the real swe_set_jpl_file path (de406/de441 trigger the load).
+// Skips cleanly when unavailable — plain `zig build test` has no corpus
+// input, so checkEopLine never runs there.
+var eop_swed: sweph.Swed = .{};
+var eop_models: lib.AstroModels = .{};
+var eop_dctx: deltat.DeltatCtx = .{};
+var eop_tried = false;
+var eop_ok = false;
+
+fn ensureEopTables() bool {
+    if (eop_tried) return eop_ok;
+    eop_tried = true;
+    sweph.swe_set_ephe_path("../ephe", &eop_swed, &eop_models, &eop_dctx, null);
+    for ([_][]const u8{ "de406.eph", "de441.eph" }) |jpl| {
+        sweph.swe_set_jpl_file(jpl, &eop_swed, &eop_models, &eop_dctx);
+        if (eop_swed.eop_dpsi_loaded > 0) {
+            eop_ok = true;
+            break;
+        }
+    }
+    return eop_ok;
+}
+
 fn checkB(line: []const u8) bool {
     var tok = std.mem.tokenizeScalar(u8, line, ' ');
     if (!std.mem.eql(u8, tok.next() orelse return true, "B")) return true;
@@ -48,7 +74,7 @@ fn checkB(line: []const u8) bool {
     want[1] = parseFloat(tok.next()) orelse return parseFail(line);
     const models = lib.AstroModels{ .nut = nut, .jplhora = jh };
     var got: [2]f64 = undefined;
-    _ = lib.swi_nutation(J, iflag, &got, models, null);
+    _ = lib.swi_nutation(J, iflag, &got, models, null, null);
     if (bitsEq(got[0], want[0]) and bitsEq(got[1], want[1])) return true;
     std.debug.print("MISMATCH: {s}\n  want={x},{x} got={x},{x}\n", .{
         line,
@@ -172,6 +198,34 @@ fn checkZ(line: []const u8) bool {
     return false;
 }
 
+/// kind EB: swi_nutation(J, SEFLG_JPLHOR[|SPEED]) with LOADED EOP tables
+/// (verify-repo nut_eop corpus). Direct applicator coverage: no position
+/// cache involved, every line executes the bessel interpolation.
+fn checkEopLine(line: []const u8) bool {
+    var tok = std.mem.tokenizeScalar(u8, line, ' ');
+    if (!std.mem.eql(u8, tok.next() orelse return true, "EB")) return true;
+    const J = parseFloat(tok.next()) orelse return parseFail(line);
+    const iflag = parseInt(tok.next()) orelse return parseFail(line);
+    if (!std.mem.eql(u8, tok.next() orelse return parseFail(line), "->")) return parseFail(line);
+    var want: [2]f64 = undefined;
+    want[0] = parseFloat(tok.next()) orelse return parseFail(line);
+    want[1] = parseFloat(tok.next()) orelse return parseFail(line);
+    if (!ensureEopTables()) return true;
+    const models = lib.AstroModels{};
+    const view = sweph.eopViewOf(&eop_swed);
+    var got: [2]f64 = undefined;
+    _ = lib.swi_nutation(J, iflag, &got, models, null, view);
+    if (bitsEq(got[0], want[0]) and bitsEq(got[1], want[1])) return true;
+    std.debug.print("MISMATCH: {s}\n  want={x},{x} got={x},{x}\n", .{
+        line,
+        @as(u64, @bitCast(want[0])),
+        @as(u64, @bitCast(want[1])),
+        @as(u64, @bitCast(got[0])),
+        @as(u64, @bitCast(got[1])),
+    });
+    return false;
+}
+
 pub fn checkNutLine(line: []const u8) bool {
     if (line.len == 0) return true;
     return switch (line[0]) {
@@ -180,6 +234,7 @@ pub fn checkNutLine(line: []const u8) bool {
         'X' => checkX(line),
         'Y' => checkY(line),
         'Z' => checkZ(line),
+        'E' => checkEopLine(line),
         else => true,
     };
 }

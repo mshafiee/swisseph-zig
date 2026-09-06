@@ -5,17 +5,18 @@ const std = @import("std");
 const lib = @import("swephlib");
 const sweph = @import("sweph");
 
-// C stdio for seorbel.txt — wasm uses in-memory stub
+// C stdio for seorbel.txt — wasm uses the in-memory VFS (src/vfs.zig)
+const vfs = @import("vfs");
 const is_wasm = @import("builtin").target.cpu.arch.isWasm();
 fn fgets(buf: [*]u8, size: i32, stream: ?*anyopaque) ?[*:0]u8 {
-    if (is_wasm) return null;
+    if (is_wasm) return vfs.fgets(buf, size, stream);
     const c = struct {
         extern "c" fn fgets(buf: [*]u8, size: i32, stream: ?*anyopaque) ?[*:0]u8;
     };
     return c.fgets(buf, size, stream);
 }
 fn fclose(stream: ?*anyopaque) i32 {
-    if (is_wasm) return 0;
+    if (is_wasm) return vfs.fclose(stream);
     const c = struct {
         extern "c" fn fclose(stream: ?*anyopaque) i32;
     };

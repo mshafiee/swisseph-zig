@@ -55,3 +55,12 @@ jobs:
           zig build libswe -Dtarget=x86_64-freebsd -Doptimize=ReleaseFast
           zig build libswe -Dtarget=aarch64-freebsd -Doptimize=ReleaseFast
           zig build libswe -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast
+      - name: WASM end-to-end (VFS, bit-exact vs native pure golden)
+        shell: bash
+        # Golden is Debug on purpose: optimized native codegen may fuse FMA
+        # (x86_64/ARM) while wasm has no FMA instruction; Debug is the
+        # contraction-free bit-exact reference for the VFS comparisons.
+        run: |
+          zig build swe-golden -Doptimize=Debug -Dpure=true
+          zig build wasm-test
+          node --test test/wasm/*.test.mjs

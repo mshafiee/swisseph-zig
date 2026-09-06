@@ -9,6 +9,7 @@ const swehouse = @import("swehouse");
 const swecl = @import("swecl");
 const swehel = @import("swehel");
 const jplmod = @import("swejpl");
+const vfs = @import("vfs");
 
 const Swed = sweph.Swed;
 const DeltatCtx = deltat.DeltatCtx;
@@ -30,7 +31,7 @@ pub const SweState = struct {
     /// Safe to call on a default/never-used state.
     pub fn deinit(self: *SweState) void {
         if (self.swed.fixstar_buf.len > 0) {
-            self.swed.fs_alloc.free(self.swed.fixstar_buf);
+            sweph.fsAlloc(&self.swed).free(self.swed.fixstar_buf);
         }
         self.swed.fixstar_buf = &[_]sweph.FixedStar{};
         self.swed.fixed_stars = &[_]sweph.FixedStar{};
@@ -154,6 +155,65 @@ pub export fn swe_get_library_path(s: [*:0]u8) callconv(.c) [*:0]u8 {
 /// Idempotent; safe on a thread that never used the library.
 pub export fn swe_cleanup() callconv(.c) void {
     g_state.deinit();
+}
+
+/// Staging allocator for wasm hosts without libc malloc (wasm32-freestanding
+/// browser embeds): allocate/free bytes inside wasm linear memory so JS can
+/// stage NUL-terminated names and verbatim file contents for the VFS.
+/// Returns null on zero length, allocation failure, or non-wasm targets.
+const is_wasm_target = @import("builtin").target.cpu.arch.isWasm();
+pub export fn swe_wasm_alloc(n: usize) ?[*]u8 {
+    if (!is_wasm_target or n == 0) return null;
+    const mem = std.heap.wasm_allocator.alloc(u8, n) catch return null;
+    return mem.ptr;
+}
+
+pub export fn swe_wasm_free(ptr: ?[*]u8, n: usize) void {
+    if (!is_wasm_target) return;
+    const p = ptr orelse return;
+    if (n == 0) return;
+    std.heap.wasm_allocator.free(p[0..n]);
+}
+
+/// VFS registration for wasm hosts (copy-on-register contract).
+/// Stage file bytes into wasm memory (swe_wasm_alloc + write), then hand
+/// them over: the VFS memcpy's name+data into its own storage, so JS may
+/// release its buffers immediately after this returns 0.
+/// Names are matched by basename ("seas_18.se1"); bytes are stored verbatim
+/// (ArrayBuffer, never text-decode) — CRLF and binary layout preserved.
+/// Returns 0 ok, -1 alloc fail, -2 table full, -3 empty/oversize name.
+pub export fn swe_vfs_register(name_ptr: ?[*]const u8, name_len: usize, data_ptr: ?[*]const u8, data_len: usize) callconv(.c) i32 {
+    const np = name_ptr orelse return -3;
+    if (name_len == 0 or name_len >= vfs.MAX_NAME) return -3;
+    const dp = data_ptr orelse (if (data_len == 0) &[0]u8{} else return -1);
+    return vfs.register(np[0..name_len], dp[0..data_len]);
+}
+
+/// Evict all VFS files (frees owned bytes, resets handles/cursors).
+pub export fn swe_vfs_clear() callconv(.c) void {
+    vfs.clear();
+}
+
+/// Number of files currently registered.
+pub export fn swe_vfs_count() callconv(.c) i32 {
+    return @intCast(vfs.fileCount());
+}
+
+/// Allocator probe result for tests: 0 unprobed/non-wasm, 1 page_allocator,
+/// 2 wasm_allocator fallback.
+pub export fn swe_vfs_heap_choice() callconv(.c) i32 {
+    return vfs.heapChoiceForTest();
+}
+
+/// swisseph-zig extension: EOP loader state (sweph.c load_dpsi_deps outcome).
+/// 0 = never attempted (no swe_set_jpl_file with DE >= 403 yet), 1 =
+/// eop_1962_today.txt loaded (finals absent, which is fine), 2 = both files
+/// loaded, -1 = eop_1962_today.txt missing, -2 = it is corrupt (non-daily
+/// steps), -3 = eop_finals.txt corrupt. Diagnostic for VFS file flow; the
+/// loaded dpsi/deps tables have no in-port consumer yet (nutation applicator
+/// not ported), so this status is the observable contract.
+pub export fn swe_eop_status() callconv(.c) i32 {
+    return g_state.swed.eop_dpsi_loaded;
 }
 
 pub export fn swe_close() callconv(.c) void {
@@ -727,7 +787,7 @@ pub export fn swe_houses_ex2(tjd_ut: f64, iflag: i32, geolat: f64, geolon: f64, 
     const tjde = tjd_ut + deltat.swe_deltat_ex(&g_state.dctx, tjd_ut, iflag);
     const eps_mean = swephlib.swi_epsiln(tjde, 0, g_state.models) * RADTODEG;
     var nutlo: [2]f64 = undefined;
-    _ = swephlib.swi_nutation(tjde, 0, &nutlo, g_state.models, null);
+    _ = swephlib.swi_nutation(tjde, 0, &nutlo, g_state.models, null, sweph.eopViewOf(&g_state.swed));
     nutlo[0] *= RADTODEG;
     nutlo[1] *= RADTODEG;
     if ((iflag & sweph.SEFLG_NONUT) != 0) {

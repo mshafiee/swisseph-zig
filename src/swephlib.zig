@@ -2316,11 +2316,85 @@ pub fn bessel(v: []const f64, t: f64) f64 {
     return ans;
 }
 
-/// nutation dispatcher (swephlib.c calc_nutation); EOP corrections are
-/// not part of this port yet (no eop.txt machinery) — the SEFLG_JPLHOR
-/// branch applies only the constant IAU1980_TJD0 offsets, matching the
-/// library behaviour with no EOP file loaded.
-fn calc_nutation(J: f64, iflag: i32, nutlo: *[2]f64, models: AstroModels) i32 {
+/// View of the EOP daily series (sweph.c load_dpsi_deps output) for JPLHOR
+/// nutation corrections. Slices borrow the caller's Swed — no copy and no
+/// sweph->swephlib import cycle. A null view replicates C-with-zero-tables
+/// bit-exactly (see calc_nutation).
+pub const EopView = struct {
+    dpsi: []const f64 = &[_]f64{},
+    deps: []const f64 = &[_]f64{},
+    tjd_beg: f64 = 0,
+    tjd_end: f64 = 0,
+    tjd_beg_horizons: f64 = 0,
+};
+
+/// Bessel central-difference interpolation over a daily series
+/// (swephlib.c bessel, 1:1 including edge guards and op order).
+/// Hold-flat ends: t <= 0 yields v[0], t >= n-1 yields v[n-1].
+fn besselEop(v: []const f64, n: i32, t: f64) f64 {
+    var ans: f64 = undefined;
+    var p: f64 = undefined;
+    var b: f64 = undefined;
+    var d: [6]f64 = undefined;
+    if (t <= 0) {
+        return v[0];
+    }
+    if (t >= @as(f64, @floatFromInt(n - 1))) {
+        return v[@intCast(n - 1)];
+    }
+    p = @floor(t);
+    const iy: i32 = @intFromFloat(t);
+    // Zeroth order estimate is value at start of interval
+    ans = v[@intCast(iy)];
+    var k: i32 = iy + 1;
+    if (k >= n)
+        return ans;
+    // The fraction of tabulation interval
+    p = t - p;
+    ans += p * (v[@intCast(k)] - v[@intCast(iy)]);
+    if ((iy - 1 < 0) or (iy + 2 >= n))
+        return ans; // can't do second differences
+    // Make table of first differences
+    k = iy - 2;
+    var i: usize = 0;
+    while (i < 5) : (i += 1) {
+        if ((k < 0) or (k + 1 >= n)) {
+            d[i] = 0;
+        } else {
+            d[i] = v[@intCast(k + 1)] - v[@intCast(k)];
+        }
+        k += 1;
+    }
+    // Compute second differences
+    i = 0;
+    while (i < 4) : (i += 1) {
+        d[i] = d[i + 1] - d[i];
+    }
+    b = 0.25 * p * (p - 1.0);
+    ans += b * (d[1] + d[2]);
+    if (iy + 2 >= n)
+        return ans;
+    // Compute third differences
+    i = 0;
+    while (i < 3) : (i += 1) {
+        d[i] = d[i + 1] - d[i];
+    }
+    b = 2.0 * b / 3.0;
+    ans += (p - 0.5) * b * d[1];
+    if ((iy - 2 < 0) or (iy + 3 > n))
+        return ans;
+    // Compute fourth differences
+    i = 0;
+    while (i < 2) : (i += 1) {
+        d[i] = d[i + 1] - d[i];
+    }
+    b = 0.125 * b * (p + 1.0) * (p - 2.0);
+    ans += b * (d[0] + d[1]);
+    return ans;
+}
+
+/// nutation dispatcher (swephlib.c calc_nutation).
+fn calc_nutation(J: f64, iflag: i32, nutlo: *[2]f64, models: AstroModels, eop: ?EopView) i32 {
     var nut_model = models.nut;
     var jplhora_model = models.jplhora;
     var is_jplhor = false;
@@ -2335,9 +2409,25 @@ fn calc_nutation(J: f64, iflag: i32, nutlo: *[2]f64, models: AstroModels) i32 {
     if (is_jplhor) {
         _ = calc_nutation_iau1980(J, nutlo, models);
         if ((iflag & SEFLG_JPLHOR) != 0) {
-            // EOP corrections require eop.txt (loaded with a JPL file);
-            // not ported yet — see plan.
-            unreachable;
+            // Daily EOP corrections (sweph.c load_dpsi_deps series). C reads
+            // swed globals; the port threads them as a view. A null view
+            // replicates C-with-zero-tables bit-exactly: bessel over zero
+            // arrays returns v[0] = 0.0, applied through the same expression.
+            var dpsi_v: f64 = 0;
+            var deps_v: f64 = 0;
+            if (eop) |e| {
+                // e.tjd_end/beg come from the loader (finite MJDs, end >= beg
+                // by construction), so this stays in i32 range; C UB on
+                // garbage has no observable contract to match.
+                const nn: i32 = @intFromFloat(e.tjd_end - e.tjd_beg + 0.000001);
+                var j2 = J;
+                if (J < e.tjd_beg_horizons)
+                    j2 = e.tjd_beg_horizons;
+                dpsi_v = besselEop(e.dpsi, nn + 1, j2 - e.tjd_beg);
+                deps_v = besselEop(e.deps, nn + 1, j2 - e.tjd_beg);
+            }
+            nutlo[0] += dpsi_v / 3600.0 * DEGTORAD;
+            nutlo[1] += deps_v / 3600.0 * DEGTORAD;
         } else {
             nutlo[0] += DPSI_IAU1980_TJD0 / 3600.0 * DEGTORAD;
             nutlo[1] += DEPS_IAU1980_TJD0 / 3600.0 * DEGTORAD;
@@ -2378,9 +2468,11 @@ pub const Interp = struct {
 
 /// Nutation in longitude and obliquity, in radians (swephlib.c swi_nutation).
 /// interp == null mirrors swed.do_interpolate_nut == FALSE.
-pub fn swi_nutation(tjd: f64, iflag: i32, nutlo: *[2]f64, models: AstroModels, interp: ?*Interp) i32 {
+/// eop carries the EOP daily series for the JPLHOR branch (null replicates
+/// C-with-zero-tables); callers without a Swed pass null.
+pub fn swi_nutation(tjd: f64, iflag: i32, nutlo: *[2]f64, models: AstroModels, interp: ?*Interp, eop: ?EopView) i32 {
     if (interp == null) {
-        return calc_nutation(tjd, iflag, nutlo, models);
+        return calc_nutation(tjd, iflag, nutlo, models, eop);
     }
     // from interpolation, with three data points in 1-day steps;
     // maximum error is about 3 mas
@@ -2394,15 +2486,15 @@ pub fn swi_nutation(tjd: f64, iflag: i32, nutlo: *[2]f64, models: AstroModels, i
         var dnut: [2]f64 = undefined;
         ip.tjd_nut0 = tjd - 1.0; // one day earlier
         ip.tjd_nut2 = tjd + 1.0; // one day later
-        var retc = calc_nutation(ip.tjd_nut0, iflag, &dnut, models);
+        var retc = calc_nutation(ip.tjd_nut0, iflag, &dnut, models, eop);
         if (retc == ERR) return ERR;
         ip.nut_dpsi0 = dnut[0];
         ip.nut_deps0 = dnut[1];
-        retc = calc_nutation(ip.tjd_nut2, iflag, &dnut, models);
+        retc = calc_nutation(ip.tjd_nut2, iflag, &dnut, models, eop);
         if (retc == ERR) return ERR;
         ip.nut_dpsi2 = dnut[0];
         ip.nut_deps2 = dnut[1];
-        retc = calc_nutation(tjd, iflag, nutlo, models);
+        retc = calc_nutation(tjd, iflag, nutlo, models, eop);
         if (retc == ERR) return ERR;
         ip.nut_dpsi1 = nutlo[0];
         ip.nut_deps1 = nutlo[1];
@@ -2601,7 +2693,7 @@ fn sidtime_long_term(tjd_ut: f64, eps: f64, nut: f64, models: AstroModels, dctx:
     _ = swi_precess(&xs, tjd_et, 0, -1, models);
     // to mean equinox of date
     xobl[1] = swi_epsiln(tjd_et, 0, models) * RADTODEG;
-    _ = swi_nutation(tjd_et, 0, &nutlo, models, interp);
+    _ = swi_nutation(tjd_et, 0, &nutlo, models, interp, null);
     xobl[0] = xobl[1] + nutlo[1] * RADTODEG;
     xobl[2] = nutlo[0] * RADTODEG;
     swi_coortrf(&xs, &xs, xobl[1] * DEGTORAD);
@@ -2742,7 +2834,7 @@ pub fn swe_sidtime(tjd_ut: f64, models: AstroModels, dctx: *DeltatCtx, interp: ?
     // delta t adjusted to default tidal acceleration of the moon
     const tjde = tjd_ut + swe_deltat_ex(dctx, tjd_ut, -1);
     const eps = swi_epsiln(tjde, 0, models) * RADTODEG;
-    _ = swi_nutation(tjde, 0, &nutlo, models, interp);
+    _ = swi_nutation(tjde, 0, &nutlo, models, interp, null);
     var i: usize = 0;
     while (i < 2) : (i += 1)
         nutlo[i] *= RADTODEG;

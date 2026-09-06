@@ -27,7 +27,7 @@ endif
 TRIPLES_ALL := x86_64-linux-gnu aarch64-linux-gnu x86_64-freebsd aarch64-freebsd x86_64-macos aarch64-macos x86_64-windows wasm32-freestanding wasm32-wasi
 
 .DEFAULT_GOAL := native
-.PHONY: help all build native linux freebsd macos windows wasm dist test lint format fmt clean distclean install release _collect-triple
+.PHONY: help all build native linux freebsd macos windows wasm wasm-test dist test lint format fmt clean distclean install release _collect-triple
 
 help:
 	@echo "swisseph-zig — Zig Makefile"
@@ -35,6 +35,7 @@ help:
 	@echo "  make all / dist      — all 9 targets"
 	@echo "  make linux|freebsd|macos|windows|wasm"
 	@echo "  make test            — zig build test"
+	@echo "  make wasm-test       — wasm artifacts + node --test test/wasm/"
 	@echo "  make lint            — zig fmt --check"
 	@echo "  make format / fmt    — zig fmt"
 	@echo "  make clean / distclean / install / release"
@@ -80,6 +81,16 @@ dist/%:
 
 test:
 	@$(BUILD) test
+
+# WASM end-to-end: native pure golden + both runnable wasm artifacts, then the
+# zero-dependency Node harness (bit-exact VFS-vs-disk comparisons).
+# The golden is deliberately Debug: optimized native codegen may fuse FMA on
+# x86_64/ARM while wasm has no FMA instruction, breaking bit-exactness for
+# reasons unrelated to the VFS. Debug is the contraction-free reference.
+wasm-test:
+	@$(BUILD) swe-golden -Doptimize=Debug -Dpure=true
+	@$(BUILD) wasm-test
+	@node --test test/wasm/*.test.mjs
 
 lint:
 	@$(ZIG) fmt --check src/ examples/ test/

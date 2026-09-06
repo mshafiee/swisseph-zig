@@ -3,3 +3,4 @@ zig-out/
 dist/
 *.pdb
 core
+test/wasm/.tmp/

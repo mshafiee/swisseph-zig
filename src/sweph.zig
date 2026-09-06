@@ -6,6 +6,7 @@
 const std = @import("std");
 const lib = @import("swephlib");
 const deltat = @import("deltat");
+const vfs = @import("vfs");
 
 const swe_shim_sin = lib.swe_shim_sin;
 const swe_shim_cos = lib.swe_shim_cos;
@@ -375,45 +376,49 @@ pub const GcData = struct {
     sunradius: f64 = 0,
 };
 
-// C stdio for ephemeris file machinery — on wasm use in-memory stubs (no libc)
+// C stdio for ephemeris file machinery — on wasm the in-memory VFS
+// (src/vfs.zig, no libc); elsewhere the real C library.
 const is_wasm = @import("builtin").target.cpu.arch.isWasm();
-fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque {
-    if (is_wasm) return null;
+// VFS is read-only; all callers open "rb", so the mode is ignored on wasm.
+fn fopen(path: [*:0]const u8, _mode: [*:0]const u8) ?*anyopaque {
+    if (is_wasm) {
+        return vfs.fopen(path);
+    }
     const c = struct {
         extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
     };
-    return c.fopen(path, mode);
+    return c.fopen(path, _mode);
 }
 fn fread(ptr: [*]u8, size: usize, nitems: usize, stream: ?*anyopaque) usize {
-    if (is_wasm) return 0;
+    if (is_wasm) return vfs.fread(ptr, size, nitems, stream);
     const c = struct {
         extern "c" fn fread(ptr: [*]u8, size: usize, nitems: usize, stream: ?*anyopaque) usize;
     };
     return c.fread(ptr, size, nitems, stream);
 }
 fn fseek(stream: ?*anyopaque, off: i64, whence: i32) i32 {
-    if (is_wasm) return -1;
+    if (is_wasm) return vfs.fseek(stream, off, whence);
     const c = struct {
         extern "c" fn fseek(stream: ?*anyopaque, off: i64, whence: i32) i32;
     };
     return c.fseek(stream, off, whence);
 }
 fn ftell(stream: ?*anyopaque) i64 {
-    if (is_wasm) return -1;
+    if (is_wasm) return vfs.ftell(stream);
     const c = struct {
         extern "c" fn ftell(stream: ?*anyopaque) i64;
     };
     return c.ftell(stream);
 }
 fn fclose(stream: ?*anyopaque) i32 {
-    if (is_wasm) return 0;
+    if (is_wasm) return vfs.fclose(stream);
     const c = struct {
         extern "c" fn fclose(stream: ?*anyopaque) i32;
     };
     return c.fclose(stream);
 }
 fn fgets(buf: [*]u8, size: i32, stream: ?*anyopaque) ?[*:0]u8 {
-    if (is_wasm) return null;
+    if (is_wasm) return vfs.fgets(buf, size, stream);
     const c = struct {
         extern "c" fn fgets(buf: [*]u8, size: i32, stream: ?*anyopaque) ?[*:0]u8;
     };
@@ -453,6 +458,7 @@ pub const Swed = struct {
     // backing store of fixed_stars (freed by SweState.deinit in the ABI layer)
     fixstar_buf: []FixedStar = &[_]FixedStar{},
     fs_alloc: std.mem.Allocator = std.heap.page_allocator,
+    fs_alloc_ready: bool = false, // set by fsAlloc() on first wasm use
     fixstar_last_stardata: FixedStar = .{},
     fixstar_slast_starname: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH,
     fixstar_slast_record: [AS_MAXCH]u8 = [_]u8{0} ** AS_MAXCH,
@@ -495,6 +501,19 @@ pub const Swed = struct {
 
 fn nutInterp(swed: *Swed) ?*lib.Interp {
     return if (swed.do_interpolate_nut) &swed.interp else null;
+}
+
+/// EOP daily-series view for JPLHOR nutation (slices borrow swed).
+/// Shared by swecl/swe_abi; always non-null (null semantics live in
+/// calc_nutation for swed-less callers only).
+pub fn eopViewOf(swed: *const Swed) ?lib.EopView {
+    return lib.EopView{
+        .dpsi = swed.dpsi[0..],
+        .deps = swed.deps[0..],
+        .tjd_beg = swed.eop_tjd_beg,
+        .tjd_end = swed.eop_tjd_end,
+        .tjd_beg_horizons = swed.eop_tjd_beg_horizons,
+    };
 }
 
 pub fn square_sum(x: []const f64) f64 {
@@ -560,7 +579,7 @@ fn swi_check_nutation(tjd: f64, iflag: i32, swed: *Swed, models: AstroModels) vo
     if ((iflag & SEFLG_NONUT) == 0 and
         (tjd != swed.nut.tnut or tjd == 0 or (speedf1 == 0 and speedf2 != 0)))
     {
-        _ = lib.swi_nutation(tjd, iflag, &swed.nut.nutlo, models, nutInterp(swed));
+        _ = lib.swi_nutation(tjd, iflag, &swed.nut.nutlo, models, nutInterp(swed), eopViewOf(swed));
         swed.nut.tnut = tjd;
         swed.nut.snut = swe_shim_sin(swed.nut.nutlo[1]);
         swed.nut.cnut = swe_shim_cos(swed.nut.nutlo[1]);
@@ -569,7 +588,7 @@ fn swi_check_nutation(tjd: f64, iflag: i32, swed: *Swed, models: AstroModels) vo
         if ((iflag & SEFLG_SPEED) != 0) {
             // once more for 'speed' of nutation, needed for planetary speeds
             const t = tjd - NUT_SPEED_INTV;
-            _ = lib.swi_nutation(t, iflag, &swed.nutv.nutlo, models, nutInterp(swed));
+            _ = lib.swi_nutation(t, iflag, &swed.nutv.nutlo, models, nutInterp(swed), eopViewOf(swed));
             swed.nutv.tnut = t;
             swed.nutv.snut = swe_shim_sin(swed.nutv.nutlo[1]);
             swed.nutv.cnut = swe_shim_cos(swed.nutv.nutlo[1]);
@@ -1167,7 +1186,7 @@ pub fn swi_get_observer(tjd: f64, iflag: i32, do_save: bool, xobs: *[6]f64, swed
     } else {
         eps = lib.swi_epsiln(tjd, iflag, models);
         if ((iflag & SEFLG_NONUT) == 0)
-            _ = lib.swi_nutation(tjd, iflag, &nutlo, models, nutInterp(swed));
+            _ = lib.swi_nutation(tjd, iflag, &nutlo, models, nutInterp(swed), eopViewOf(swed));
     }
     if ((iflag & SEFLG_NONUT) != 0) {
         nut = 0;
@@ -1562,7 +1581,7 @@ pub fn swe_get_ayanamsa_ex(tjd_et: f64, iflag: i32, daya: *f64, swed: *Swed, mod
             nutp = &swed.nut;
         } else {
             nutp = &nuttmp;
-            _ = lib.swi_nutation(tjd_et, iflag, &nutp.nutlo, models, nutInterp(swed));
+            _ = lib.swi_nutation(tjd_et, iflag, &nutp.nutlo, models, nutInterp(swed), eopViewOf(swed));
         }
         daya.* += nutp.nutlo[0] * RADTODEG;
         retval &= ~SEFLG_NONUT; // must remove flag which was added internally in swi_get_ayanamsa_ex()
@@ -3607,7 +3626,7 @@ pub fn swi_plan_for_osc_elem(iflag: i32, tjd: f64, xx: *[6]f64, swed: *Swed, mod
             nutp = &swed.nutv;
         } else {
             nutp = &nuttmp;
-            _ = lib.swi_nutation(tjd, iflag, &nutp.nutlo, models, nutInterp(swed));
+            _ = lib.swi_nutation(tjd, iflag, &nutp.nutlo, models, nutInterp(swed), eopViewOf(swed));
             nutp.tnut = tjd;
             nutp.snut = swe_shim_sin(nutp.nutlo[1]);
             nutp.cnut = swe_shim_cos(nutp.nutlo[1]);
@@ -4035,7 +4054,24 @@ fn lunar_osc_elem(tjd: f64, ipl_nd: usize, iflag_in: i32, swed: *Swed, models: A
 // SWIEPH file machinery (sweph.c read_const / do_fread / get_new_segment /
 // rot_back / sweplan / sweph / swi_fopen / swe_set_ephe_path)
 
-const c_allocator = if (is_wasm) std.heap.page_allocator else std.heap.c_allocator;
+// Segment/element heap (pdp.segp, pdp.refep). On wasm, page_allocator is
+// runtime-unverified in a browser, so vfs.heapAllocator() probes it once and
+// falls back to the proven wasm_allocator (memory.grow) on failure.
+fn cAllocator() std.mem.Allocator {
+    if (is_wasm) return vfs.heapAllocator();
+    return std.heap.c_allocator;
+}
+
+/// Fixstar backing-store allocator. Swed.fs_alloc defaults to page_allocator;
+/// on wasm the first use swaps in the probed heapAllocator() so alloc and
+/// free (SweState.deinit) always agree. Idempotent.
+pub fn fsAlloc(swed: *Swed) std.mem.Allocator {
+    if (is_wasm and !swed.fs_alloc_ready) {
+        swed.fs_alloc = vfs.heapAllocator();
+        swed.fs_alloc_ready = true;
+    }
+    return swed.fs_alloc;
+}
 
 fn fio_fopen(path: []const u8, mode: []const u8) ?*anyopaque {
     var pbuf: [AS_MAXCH * 2]u8 = undefined;
@@ -4343,7 +4379,9 @@ fn read_const(ifno: usize, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: 
         return fileDamage(serr, swed, ifno, "m");
     }
     const mycrc = lib.swi_crc32(cbuf[0..@intCast(fpos2)]);
-    if (false and mycrc != ulng) {
+    // Enabled: verified against real dist files (sepl/semo/seas_18.se1 all
+    // match), bit-identical algorithm to C, which enforces this too.
+    if (mycrc != ulng) {
         return fileDamage(serr, swed, ifno, "n");
     }
     _ = fseek(fp, @as(i64, fpos2) + 4, SEEK_SET);
@@ -4391,7 +4429,10 @@ fn read_const(ifno: usize, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: 
         pdp.tfstart = doubles[0];
         pdp.tfend = doubles[1];
         pdp.dseg = doubles[2];
-        pdp.nndx = @intFromFloat(@trunc((doubles[1] - doubles[0] + 0.1) / doubles[2]));
+        // nndx is write-only (never read back); saturate instead of
+        // panicking on corrupt spans — C UB here, unobservable either way.
+        const nndx_f = @trunc((doubles[1] - doubles[0] + 0.1) / doubles[2]);
+        pdp.nndx = if (!std.math.isFinite(nndx_f)) 0 else if (nndx_f > 2147483647) 2147483647 else if (nndx_f < -2147483648) -2147483648 else @intFromFloat(nndx_f);
         pdp.telem = doubles[3];
         pdp.prot = doubles[4];
         pdp.dprot = doubles[5];
@@ -4404,7 +4445,7 @@ fn read_const(ifno: usize, serr: ?[]u8, swed: *Swed, models: AstroModels, dctx: 
                 pdp.refep = null;
                 pdp.segp = null;
             }
-            pdp.refep = c_allocator.alloc(f64, @intCast(pdp.ncoe * 2)) catch null;
+            pdp.refep = cAllocator().alloc(f64, @intCast(pdp.ncoe * 2)) catch null;
             if (pdp.refep == null) return ERR;
             if (do_fread(std.mem.sliceAsBytes(pdp.refep.?), 8, 2 * pdp.ncoe, 8, fp, SEI_CURR_FPOS, freord, fendian, serr, swed) != OK) {
                 pdp.refep = null;
@@ -4475,8 +4516,13 @@ pub fn get_new_segment(tjd: f64, ipli: usize, ifno: usize, serr: ?[]u8, swed: *S
     const pdp = &swed.pldat[ipli];
     const fdp = &swed.fidat[ifno];
     const fp = fdp.fp;
-    // compute segment number
-    const iseg: i32 = @intFromFloat((tjd - pdp.tfstart) / pdp.dseg);
+    // compute segment number; absent bodies (zero pdp) and corrupt dseg
+    // make this non-finite (C UB: (int)inf) — fail gracefully like C's
+    // observable damage error instead of panicking (Debug) / UB (release).
+    const iseg_f = (tjd - pdp.tfstart) / pdp.dseg;
+    if (!std.math.isFinite(iseg_f) or iseg_f > 2147483647 or iseg_f < -2147483648)
+        return returnErrorFile(serr, swed, ifno);
+    const iseg: i32 = @intFromFloat(iseg_f);
     pdp.tseg0 = pdp.tfstart + @as(f64, @floatFromInt(iseg)) * pdp.dseg;
     pdp.tseg1 = pdp.tseg0 + pdp.dseg;
     // get file position of planet's index from file
@@ -4487,7 +4533,7 @@ pub fn get_new_segment(tjd: f64, ipli: usize, ifno: usize, serr: ?[]u8, swed: *S
     _ = fseek(fp, @intCast(fpos), SEEK_SET);
     // clear space for chebyshev coefficients
     if (pdp.segp == null) {
-        pdp.segp = c_allocator.alloc(f64, @intCast(pdp.ncoe * 3)) catch {
+        pdp.segp = cAllocator().alloc(f64, @intCast(pdp.ncoe * 3)) catch {
             if (fdp.fp != null) {
                 _ = fclose(fdp.fp);
                 fdp.fp = null;
@@ -5502,7 +5548,7 @@ fn fixstarCutString(srecord_in: []const u8, star: ?[]u8, stardata: *FixedStar, s
 fn saveStarInStruct(nrecs: usize, fstp: *const FixedStar, swed: *Swed, serr: ?[]u8) i32 {
     if (swed.fixstar_buf.len < nrecs) {
         const newlen = if (swed.fixstar_buf.len == 0) 128 else swed.fixstar_buf.len * 2;
-        const newbuf = swed.fs_alloc.realloc(swed.fixstar_buf, newlen) catch {
+        const newbuf = fsAlloc(swed).realloc(swed.fixstar_buf, newlen) catch {
             if (serr) |sr| {
                 const msg = "error in function load_all_fixed_stars(): could not resize fixed stars array";
                 const m = @min(msg.len, sr.len - 1);
@@ -5815,11 +5861,14 @@ fn load_dpsi_deps(swed: *Swed) void {
         var cpos_slices: [20][]u8 = undefined;
         for (0..20) |ci| cpos_slices[ci] = cpos[ci][0..];
         _ = lib.swi_cutstr(s[0..slen], " ", cpos_slices[0..].ptr, 16);
-        const c0 = std.mem.sliceTo(&cpos[0], 0);
+        // NOTE: tokens live in cpos_slices (cutstr re-slices them into s);
+        // cpos itself is just scratch backing — reading it here silently
+        // skipped every line (iyear == 0) and masks corrupt files.
+        const c0 = std.mem.sliceTo(cpos_slices[0], 0);
         iyear = atoiSlice(c0);
         if (iyear == 0)
             continue;
-        const c3 = std.mem.sliceTo(&cpos[3], 0);
+        const c3 = std.mem.sliceTo(cpos_slices[3], 0);
         mjd = atoiSlice(c3);
         // is file in one-day steps?
         if (mjdsv > 0 and mjd - mjdsv != 1) {
@@ -5830,9 +5879,9 @@ fn load_dpsi_deps(swed: *Swed) void {
         }
         if (n == 0)
             swed.eop_tjd_beg = @as(f64, @floatFromInt(mjd)) + TJDOFS;
-        const c8 = std.mem.sliceTo(&cpos[8], 0);
+        const c8 = std.mem.sliceTo(cpos_slices[8], 0);
         swed.dpsi[n] = atofSlice(c8);
-        const c9 = std.mem.sliceTo(&cpos[9], 0);
+        const c9 = std.mem.sliceTo(cpos_slices[9], 0);
         swed.deps[n] = atofSlice(c9);
         n += 1;
         mjdsv = mjd;

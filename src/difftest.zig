@@ -81,7 +81,7 @@ fn checkLine(line: []const u8) bool {
         return plandiff.checkPlanLine(line);
     if (std.mem.eql(u8, kind0, "B") or std.mem.eql(u8, kind0, "O") or
         std.mem.eql(u8, kind0, "X") or std.mem.eql(u8, kind0, "Y") or
-        std.mem.eql(u8, kind0, "Z"))
+        std.mem.eql(u8, kind0, "Z") or std.mem.eql(u8, kind0, "EB"))
         return nutdiff.checkNutLine(line);
     if (std.mem.eql(u8, kind0, "U") or std.mem.eql(u8, kind0, "S") or
         std.mem.eql(u8, kind0, "Q") or std.mem.eql(u8, kind0, "L") or
