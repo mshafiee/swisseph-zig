@@ -77,6 +77,9 @@ dist/%:
 	    *) [ -e zig-out/$(@F)/bin/$$b ] && cp -f zig-out/$(@F)/bin/$$b $(DIST)/$(@F)/bin/ 2>/dev/null || true; ;; \
 	  esac; \
 	done
+	@case "$(@F)" in \
+	  wasm32-freestanding) $(BUILD) wasm && node scripts/gen-wasm-ts.mjs && cp -f zig-out/wasm/swe.wasm test/wasm/swe-bridge.d.ts $(DIST)/$(@F)/ ;; \
+	esac
 	@echo "  -> $(DIST)/$(@F)/ { lib/, bin/, include/ }"
 
 test:
@@ -90,6 +93,8 @@ test:
 wasm-test:
 	@$(BUILD) swe-golden -Doptimize=Debug -Dpure=true
 	@$(BUILD) wasm-test
+	@$(BUILD) wasm
+	@node scripts/gen-wasm-ts.mjs --check
 	@node test/wasm/run-all.mjs
 
 lint:

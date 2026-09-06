@@ -364,5 +364,64 @@ pub fn build(b: *std.Build) void {
             const winstall = b.addInstallArtifact(wexe, .{ .dest_dir = .{ .override = .{ .custom = "wasm-test" } } });
             wasm_step.dependOn(&winstall.step);
         }
+
+        // ── Production swe.wasm (browser root: src/wasm.zig) ──
+        // Same module graph, rooted at wasm.zig (session API bypassing
+        // swe_abi threadlocal state). Built with the host target active.
+        const ptarget = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+        const pswedate = mkmod(b, wasm_opts, "p-swedate", "src/swedate.zig", ptarget, .ReleaseSmall);
+        const pdeltat = mkmod(b, wasm_opts, "p-deltat", "src/deltat.zig", ptarget, .ReleaseSmall);
+        const pvfs = mkmod(b, wasm_opts, "p-vfs", "src/vfs.zig", ptarget, .ReleaseSmall);
+        const pswephlib = mkmod(b, wasm_opts, "p-swephlib", "src/swephlib.zig", ptarget, .ReleaseSmall);
+        const pswemmoon = mkmod(b, wasm_opts, "p-swemmoon", "src/swemmoon.zig", ptarget, .ReleaseSmall);
+        const pswemplan = mkmod(b, wasm_opts, "p-swemplan", "src/swemplan.zig", ptarget, .ReleaseSmall);
+        const pswejpl = mkmod(b, wasm_opts, "p-swejpl", "src/swejpl.zig", ptarget, .ReleaseSmall);
+        const psweph = mkmod(b, wasm_opts, "p-sweph", "src/sweph.zig", ptarget, .ReleaseSmall);
+        const pswehouse = mkmod(b, wasm_opts, "p-swehouse", "src/swehouse.zig", ptarget, .ReleaseSmall);
+        pdeltat.addImport("swephlib", pswephlib);
+        pswephlib.addImport("deltat", pdeltat);
+        pswephlib.addImport("swedate", pswedate);
+        pswemmoon.addImport("swephlib", pswephlib);
+        pswemplan.addImport("swephlib", pswephlib);
+        pswemplan.addImport("sweph", psweph);
+        pswemplan.addImport("vfs", pvfs);
+        pswejpl.addImport("swephlib", pswephlib);
+        pswejpl.addImport("sweph", psweph);
+        pswejpl.addImport("vfs", pvfs);
+        psweph.addImport("swephlib", pswephlib);
+        psweph.addImport("vfs", pvfs);
+        psweph.addImport("deltat", pdeltat);
+        psweph.addImport("swemmoon", pswemmoon);
+        psweph.addImport("swemplan", pswemplan);
+        psweph.addImport("swejpl", pswejpl);
+        psweph.addImport("swehouse", pswehouse);
+        pswehouse.addImport("swephlib", pswephlib);
+        const pwasm = mkmod(b, wasm_opts, "swe-wasm", "src/wasm.zig", ptarget, .ReleaseSmall);
+        pwasm.addImport("swedate", pswedate);
+        pwasm.addImport("deltat", pdeltat);
+        pwasm.addImport("vfs", pvfs);
+        pwasm.addImport("swephlib", pswephlib);
+        pwasm.addImport("sweph", psweph);
+        pwasm.addImport("swehouse", pswehouse);
+        const pswecl = mkmod(b, wasm_opts, "p-swecl", "src/swecl.zig", ptarget, .ReleaseSmall);
+        const pswehel = mkmod(b, wasm_opts, "p-swehel", "src/swehel.zig", ptarget, .ReleaseSmall);
+        pswecl.addImport("sweph", psweph);
+        pswecl.addImport("swephlib", pswephlib);
+        pswecl.addImport("deltat", pdeltat);
+        pswecl.addImport("swemmoon", pswemmoon);
+        pswecl.addImport("swemmoon", pswemmoon);
+        pswecl.addImport("swehouse", pswehouse);
+        pswehel.addImport("sweph", psweph);
+        pswehel.addImport("swecl", pswecl);
+        pswehel.addImport("swephlib", pswephlib);
+        pswehel.addImport("deltat", pdeltat);
+        pswehel.addImport("swedate", pswedate);
+        pwasm.addImport("swecl", pswecl);
+        pwasm.addImport("swehel", pswehel);
+        const wexe_prod = b.addExecutable(.{ .name = "swe", .root_module = pwasm });
+        wexe_prod.entry = .disabled;
+        wexe_prod.rdynamic = true;
+        const wasm_prod_step = b.step("wasm", "build production swe.wasm (freestanding, session API)");
+        wasm_prod_step.dependOn(&b.addInstallArtifact(wexe_prod, .{ .dest_dir = .{ .override = .{ .custom = "wasm" } } }).step);
     }
 }

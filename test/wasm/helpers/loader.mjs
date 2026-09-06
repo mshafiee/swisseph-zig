@@ -29,7 +29,7 @@ function makeSnprintf(holder) {
   };
 }
 
-class SweWasm {
+export class SweWasm {
   constructor(instance, flavor) {
     this.instance = instance;
     this.exports = instance.exports;
@@ -135,6 +135,13 @@ export async function loadWasi(preopens = {}) {
     }
   }
   return new SweWasm(instance, 'wasi');
+}
+
+// Production root (zig-out/wasm/swe.wasm): session API, zero imports.
+export async function loadProduction() {
+  const bytes = await readFile(path.resolve(HERE, '../../../zig-out/wasm/swe.wasm'));
+  const { instance } = await WebAssembly.instantiate(bytes, {});
+  return new SweWasm(instance, 'production');
 }
 
 // Both flavors; tests iterate to prove freestanding+VFS ≡ wasi+FS.
