@@ -57,6 +57,8 @@ jobs:
           zig build libswe -Dtarget=x86_64-freebsd -Doptimize=ReleaseFast
           zig build libswe -Dtarget=aarch64-freebsd -Doptimize=ReleaseFast
           zig build libswe -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast
+      - name: Setup Chrome (headless sweep gate)
+        uses: browser-actions/setup-chrome@v1
       - name: WASM end-to-end (VFS, bit-exact vs native pure golden)
         shell: bash
         # Golden is Debug on purpose: optimized native codegen may fuse FMA

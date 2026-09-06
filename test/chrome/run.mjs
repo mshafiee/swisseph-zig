@@ -15,14 +15,16 @@ const DIR = path.join(ROOT, 'test/chrome');
 const WASM = path.join(ROOT, 'zig-out/wasm/swe.wasm');
 
 function findChrome() {
-  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) return process.env.CHROME_BIN;
+  for (const v of [process.env.CHROME_BIN, process.env.CHROME_PATH]) {
+    if (v && fs.existsSync(v)) return v;
+  }
   for (const p of [
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
   ]) {
     if (fs.existsSync(p)) return p;
   }
-  for (const b of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+  for (const b of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'chrome']) {
     try {
       const r = spawnSync(b, ['--version'], { encoding: 'utf8' });
       if (r.status === 0) return b;
