@@ -51,9 +51,11 @@ export interface SweExports {
   swe_fixstar2(h: number, star_ptr: number, star_len: number, tjd: number, iflag: number, xx: number, serr: number): number;
   swe_fixstar2_ut(h: number, star_ptr: number, star_len: number, tjd_ut: number, iflag: number, xx: number, serr: number): number;
   swe_fixstar_mag(h: number, star_ptr: number, star_len: number, mag: number, serr: number): number;
+  swe_pheno(h: number, tjd_et: number, ipl: number, iflag: number, attr: number, serr: number): number;
   swe_pheno_ut(h: number, tjd_ut: number, ipl: number, iflag: number, attr: number, serr: number): number;
   swe_nod_aps_ut(h: number, tjd_ut: number, ipl: number, iflag: number, method: number, xnasc: number, xndsc: number, xperi: number, xaphe: number, serr: number): number;
   swe_rise_trans(h: number, tjd_ut: number, ipl: number, star_ptr: number, star_len: number, epheflag: number, rsmi: number, glon: number, glat: number, galt: number, atpress: number, attemp: number, tret: number, serr: number): number;
+  swe_rise_trans_true_hor(h: number, tjd_ut: number, ipl: number, star_ptr: number, star_len: number, epheflag: number, rsmi: number, glon: number, glat: number, galt: number, atpress: number, attemp: number, horhgt: number, tret: number, serr: number): number;
   swe_sol_eclipse_when_glob(h: number, tjd: number, ifl: number, ifltype: number, tret: number, backward: number, serr: number): number;
   swe_sol_eclipse_when_loc(h: number, tjd: number, ifl: number, glon: number, glat: number, galt: number, tret: number, attr: number, backward: number, serr: number): number;
   swe_lun_eclipse_when(h: number, tjd: number, ifl: number, ifltype: number, tret: number, backward: number, serr: number): number;

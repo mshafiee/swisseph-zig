@@ -739,6 +739,14 @@ pub export fn swe_fixstar_mag(h: i32, star_ptr: usize, star_len: usize, mag: *f6
 // ---------------------------------------------------------------------------
 // phenomena, nodes, rise/transit, eclipses
 // ---------------------------------------------------------------------------
+pub export fn swe_pheno(h: i32, tjd_et: f64, ipl: i32, iflag: i32, attr: [*]f64, serr: [*]u8) callconv(.c) i32 {
+    const s = sessionOf(h) orelse return -1;
+    var ab: [20]f64 = undefined;
+    const ret = swecl.swe_pheno(tjd_et, ipl, iflag, &ab, serrToZig(serr), &s.swed, s.models, &s.dctx);
+    for (0..20) |i| attr[i] = ab[i];
+    return ret;
+}
+
 pub export fn swe_pheno_ut(h: i32, tjd_ut: f64, ipl: i32, iflag: i32, attr: [*]f64, serr: [*]u8) callconv(.c) i32 {
     const s = sessionOf(h) orelse return -1;
     var ab: [20]f64 = undefined;
@@ -778,6 +786,13 @@ pub export fn swe_rise_trans(h: i32, tjd_ut: f64, ipl: i32, star_ptr: usize, sta
     var sb: [256]u8 = undefined;
     var geo: [3]f64 = .{ glon, glat, galt };
     return swecl.swe_rise_trans(tjd_ut, ipl, optStar(star_ptr, star_len, &sb), epheflag, rsmi, &geo, atpress, attemp, tret, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx);
+}
+
+pub export fn swe_rise_trans_true_hor(h: i32, tjd_ut: f64, ipl: i32, star_ptr: usize, star_len: usize, epheflag: i32, rsmi: i32, glon: f64, glat: f64, galt: f64, atpress: f64, attemp: f64, horhgt: f64, tret: *f64, serr: [*]u8) callconv(.c) i32 {
+    const s = sessionOf(h) orelse return -1;
+    var sb: [256]u8 = undefined;
+    var geo: [3]f64 = .{ glon, glat, galt };
+    return swecl.swe_rise_trans_true_hor(tjd_ut, ipl, optStar(star_ptr, star_len, &sb), epheflag, rsmi, &geo, atpress, attemp, horhgt, tret, serrToZig(serr), &s.swed, s.models, &s.dctx, &s.cctx);
 }
 
 pub export fn swe_sol_eclipse_when_glob(h: i32, tjd: f64, ifl: i32, ifltype: i32, tret: [*]f64, backward: i32, serr: [*]u8) callconv(.c) i32 {
