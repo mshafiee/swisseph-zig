@@ -89,7 +89,9 @@ Swiss Ephemeris planetary files compress JPL integration vectors into Chebyshev 
 
 Extended minor planets are stored in subdirectories organized by their Minor Planet Center (MPC) catalog index divided by 1000:
 
-$$\text{subdirectory} = \text{ast}\left(\lfloor \text{MPC id} / 1000 \rfloor\right)$$
+$$N = \left\lfloor \frac{\mathrm{MPC}}{1000} \right\rfloor$$
+
+$N$ selects directory `astN/`.
 
 * **Examples**:
   * Asteroid `433` Eros $\rightarrow$ `ast0/se00433.se1` (or `ast0/se00433s.se1`).

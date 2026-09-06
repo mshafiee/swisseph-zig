@@ -10,7 +10,8 @@ Swiss Ephemeris supports fictitious, hypothetical, and historical planetary bodi
 
 * **Source Anchors**: `include/swephexp.h:131`, `include/sweph.h:104`, solver engine `src/swemplan.zig`, orbit parameter file `seorbel.txt` (`SE_FICTFILE`).
 * **Offset Formula**:
-  $$\text{ipl} = 39 + L, \qquad L = \text{1-based line number}$$
+  $$\text{ipl} = 39 + \text{line number}$$
+  The line number is 1-based within `seorbel.txt`.
   Where `SE_FICT_OFFSET = 40`. The first entry (line 1) maps to index `40` (`SE_CUPIDO`). The engine supports custom slots up to index `999` (`MAX = 999`).
 * **Built-in Slots**: `NFICT_ELEM = 15` statically compiled fallbacks ensure IDs 40–54 evaluate even if `seorbel.txt` is missing.
 * **Coordinate Vector**: Evaluations populate `xx[6]` using standard planetary conventions:

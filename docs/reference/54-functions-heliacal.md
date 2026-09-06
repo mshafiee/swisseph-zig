@@ -158,7 +158,7 @@ Populates `darr[50]` with detailed physical quantities:
 #### The Boundary Sentinel (`TJD_INVALID = 99999999.0`)
 At high geographic latitudes during polar summer, twilight never darkens to the threshold required for stars or minor planets to become visible. When this occurs, `heliacal_ut` sets:
 
-$$\text{dret}[0] = 99999999.0 \quad (\text{no event found})$$
+$$\text{dret}[0] = 99999999.0 \quad \text{(no event)}$$
 
 This indicates a physical absence of the phenomenon within the searched timeframe, not an engine error.
 

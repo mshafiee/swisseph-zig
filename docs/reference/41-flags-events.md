@@ -153,7 +153,7 @@ Horizon crossing and meridian transit calculations (`swe_rise_trans`, `swe_rise_
 * **`SE_BIT_GEOCTR_NO_ECL_LAT` (`128`, `0x0080`)**: Forces geocentric calculations while zeroing ecliptic latitude ($\beta = 0.0^\circ$).
 * **`SE_BIT_FIXED_DISC_SIZE` (`16384`, `0x4000`)**: Forces a constant standard semi-diameter ($16'$ for Sun, Moon), bypassing dynamic topocentric distance scaling.
 * **`SE_BIT_HINDU_RISING`**: Preconfigured composite macro used in classical Indian astronomy:
-  $$\text{Hindu rising} = \text{disc center} \mid \text{no refraction} \mid \text{geocentric, no ecliptic latitude}$$
+  $$\texttt{SE-BIT-HINDU-RISING} = \texttt{DISC-CENTER} \mid \texttt{NO-REFRACTION} \mid \texttt{GEOCTR-NO-ECL-LAT}$$
 
 ---
 

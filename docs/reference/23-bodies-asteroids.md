@@ -43,7 +43,9 @@ $$\text{ipl} = 10000 + N_{\text{MPC}}$$
 
 Asteroid ephemeris files are divided across numeric partition directories based on their MPC number:
 
-$$N = \left\lfloor \frac{\text{MPC number}}{1000} \right\rfloor \implies \text{directory ast}N/$$
+$$N = \left\lfloor \frac{\mathrm{MPC}}{1000} \right\rfloor$$
+
+$N$ selects directory `astN/`.
 
 For example, asteroid **433** resides in `ast0/`, while asteroid **1862** resides in `ast1/`.
 
@@ -173,7 +175,9 @@ void query_eros(double jd_ut) {
 
 Periodic comets are designated using `SE_COMET_OFFSET` (`1000`):
 
-$$\text{ipl} = \text{comet offset} + N_{\text{comet}}$$
+$$\text{ipl} = 1000 + N_{\text{comet}}$$
+
+The comet subscript is the catalog number (`SE_COMET_OFFSET` $= 1000$).
 
 ### Why Comets Require Osculating Elements
 Unlike asteroids, comets experience significant non-gravitational acceleration caused by outgassing jets near perihelion. As a result:

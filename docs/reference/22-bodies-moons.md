@@ -16,7 +16,9 @@ Swiss Ephemeris models natural planetary satellites and physical planet centers 
 ### Catalog Indexing Scheme
 Satellite and COB indices derive from JPL Horizons planetary body numbers using the standard offset formula:
 
-$$\text{ipl} = 9000 + (\text{planet no} \times 100) + \text{moon nr}$$
+$$\text{ipl} = 9000 + (P \times 100) + M$$
+
+$P$ is the planet base number, $M$ the JPL Horizons moon number.
 
 * **Planetary Base Numbers**: Mars = `4`, Jupiter = `5`, Saturn = `6`, Uranus = `7`, Neptune = `8`, Pluto = `9`.
 * **Center of Body (COB)**: Assigned `moon_nr = 99`. Evaluating index `9000 + planet_no * 100 + 99` is functionally identical to passing the base planet index (`ipl = planet_no`) with the bit flag `SEFLG_CENTER_BODY`.
