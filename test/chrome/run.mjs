@@ -113,13 +113,19 @@ const args = [
   `http://127.0.0.1:${port}/sweep.html`,
 ];
 // detached on POSIX so killTree can take down the whole process group.
+// stdio:'ignore' is load-bearing on Windows: Chrome's helper processes
+// inherit whatever handles the browser gets, and with piped stdio they
+// hold the runner's pipes open forever — the parent's spawnSync (and
+// any `close` wait) never sees EOF, which is exactly the multi-hour CI
+// hang. With no handles to inherit, waits are bounded. Chrome's own
+// console chatter isn't needed: the page reports results via HTTP and
+// its checks are printed from the payload below.
 // NOTE: async spawn, not spawnSync — the loopback server lives on this
 // process's event loop, which a synchronous wait would starve.
-const child = spawn(chrome, args, { detached: process.platform !== 'win32' });
-let stdout = '';
-let stderr = '';
-child.stdout.on('data', (d) => (stdout += d));
-child.stderr.on('data', (d) => (stderr += d));
+const child = spawn(chrome, args, {
+  detached: process.platform !== 'win32',
+  stdio: 'ignore',
+});
 child.on('error', () => resolveClosed());
 child.on('close', () => resolveClosed());
 
@@ -140,8 +146,9 @@ if (winner.kind !== 'result' || !winner.p) {
   const why = winner.kind === 'closed'
     ? 'Chrome exited before reporting a result'
     : 'timed out waiting for the page to report a result';
-  console.error(`chrome gate: no SWE-RESULT payload (${why}). output tail:`);
-  console.error((stdout + '\n' + stderr).trimEnd().split('\n').slice(-15).join('\n'));
+  // Chrome's stdio is ignored (see spawn above), so there is no console
+  // tail to show — the page itself is the only output channel.
+  console.error(`chrome gate: no SWE-RESULT payload (${why}).`);
   process.exit(1);
 }
 let res;
