@@ -1,6 +1,12 @@
 // Headless-Chrome sweep gate runner (dependency-free).
 // Serves test/chrome/ + zig-out/wasm/swe.wasm over loopback, runs
-// sweep.html in headless Chrome, and asserts the SWE-RESULT payload.
+// sweep.html in headless Chrome, and reads the SWE-RESULT payload the
+// page POSTs back to /result — a deterministic handshake. The previous
+// --dump-dom + --virtual-time-budget approach raced module-script
+// completion (flaky "no payload" on macOS CI), and Chrome's helper
+// processes inherit the stdio pipes, so on Windows `close` may never
+// fire; here the runner resolves on the HTTP result and tree-kills
+// Chrome itself.
 // Skips (exit 0) when no Chrome binary is found — CI without Chrome
 // still runs the node gates. Override: CHROME_BIN=/path/to/chrome.
 // Usage: node test/chrome/run.mjs
@@ -14,6 +20,23 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DIR = path.join(ROOT, 'test/chrome');
 const WASM = path.join(ROOT, 'zig-out/wasm/swe.wasm');
+const TIMEOUT_MS = 120_000;
+
+function killTree(child) {
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    } catch { /* best effort */ }
+  } else {
+    // detached:true made Chrome its own process-group leader, so the
+    // negative pid kills the browser plus all its helpers.
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch {
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
+    }
+  }
+}
 
 function findChrome() {
   for (const v of [process.env.CHROME_BIN, process.env.CHROME_PATH]) {
@@ -44,6 +67,11 @@ if (!fs.existsSync(WASM)) {
   process.exit(0);
 }
 
+let resolveResult;
+const resultPromise = new Promise((resolve) => { resolveResult = resolve; });
+let resolveClosed;
+const closedPromise = new Promise((resolve) => { resolveClosed = resolve; });
+
 const server = createServer((req, res) => {
   try {
     if (req.url === '/sweep.html' || req.url === '/') {
@@ -54,6 +82,11 @@ const server = createServer((req, res) => {
       const wasm = fs.readFileSync(WASM);
       res.writeHead(200, { 'Content-Type': 'application/wasm', 'Content-Length': wasm.length });
       res.end(wasm);
+    } else if (req.url.startsWith('/result?')) {
+      const p = new URL(req.url, 'http://localhost').searchParams.get('p') ?? '';
+      res.writeHead(204);
+      res.end();
+      resolveResult(p);
     } else {
       res.writeHead(404);
       res.end('nope');
@@ -73,38 +106,49 @@ const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swe-chrome-'));
 const args = [
   '--headless=new',
   '--disable-gpu',
+  '--disable-dev-shm-usage',
   '--no-first-run',
   '--no-default-browser-check',
   `--user-data-dir=${profileDir}`,
-  `--virtual-time-budget=60000`,
-  '--dump-dom',
   `http://127.0.0.1:${port}/sweep.html`,
 ];
+// detached on POSIX so killTree can take down the whole process group.
 // NOTE: async spawn, not spawnSync — the loopback server lives on this
-// process's event loop, which a synchronous wait would starve (Chrome
-// would hang with an empty DOM dump).
-const out = await new Promise((resolve, reject) => {
-  const child = spawn(chrome, args, { timeout: 120000 });
-  let stdout = '';
-  let stderr = '';
-  child.stdout.on('data', (d) => (stdout += d));
-  child.stderr.on('data', (d) => (stderr += d));
-  child.on('error', reject);
-  child.on('close', () => resolve(stdout + '\n' + stderr));
-});
+// process's event loop, which a synchronous wait would starve.
+const child = spawn(chrome, args, { detached: process.platform !== 'win32' });
+let stdout = '';
+let stderr = '';
+child.stdout.on('data', (d) => (stdout += d));
+child.stderr.on('data', (d) => (stderr += d));
+child.on('error', () => resolveClosed());
+child.on('close', () => resolveClosed());
+
+const timer = setTimeout(() => resolveResult(null), TIMEOUT_MS);
+const winner = await Promise.race([
+  resultPromise.then((p) => ({ kind: 'result', p })),
+  closedPromise.then(() => ({ kind: 'closed' })),
+]);
+clearTimeout(timer);
+// Bounded: even if a Chrome helper lingers on the pipes after the kill,
+// never let a stuck `close` stall the runner (the Windows-hang failure
+// mode). Termination is forced by the explicit exit codes below.
+killTree(child);
+await Promise.race([closedPromise, new Promise((r) => setTimeout(r, 5_000))]);
 server.close();
 fs.rmSync(profileDir, { recursive: true, force: true });
-const m = out.match(/SWE-RESULT (\{.*\})/);
-if (!m) {
-  console.error('chrome gate: no SWE-RESULT payload. output tail:');
-  console.error(out.trimEnd().split('\n').slice(-15).join('\n'));
+if (winner.kind !== 'result' || !winner.p) {
+  const why = winner.kind === 'closed'
+    ? 'Chrome exited before reporting a result'
+    : 'timed out waiting for the page to report a result';
+  console.error(`chrome gate: no SWE-RESULT payload (${why}). output tail:`);
+  console.error((stdout + '\n' + stderr).trimEnd().split('\n').slice(-15).join('\n'));
   process.exit(1);
 }
 let res;
 try {
-  res = JSON.parse(m[1]);
+  res = JSON.parse(winner.p.replace(/^SWE-RESULT /, ''));
 } catch (e) {
-  console.error(`chrome gate: unparsable payload: ${m[1].slice(0, 300)}`);
+  console.error(`chrome gate: unparsable payload: ${winner.p.slice(0, 300)}`);
   process.exit(1);
 }
 for (const c of res.checks) console.log(`chrome: ${c.ok ? 'ok' : 'FAIL'} ${c.name}${c.extra ? ` (${c.extra})` : ''}`);
@@ -113,3 +157,4 @@ if (!res.pass) {
   process.exit(1);
 }
 console.log('chrome gate: pass');
+process.exit(0);

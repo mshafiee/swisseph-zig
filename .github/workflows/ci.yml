@@ -19,6 +19,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # Backstop: the headless-Chrome wasm gate once hung a Windows runner
+    # for 5h+ (helpers holding stdio pipes). 20 min is >5x the slowest
+    # observed job; a hang beyond that is a bug worth failing loudly.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       # NOTE: mlugg/setup-zig has no node24-native major yet (v2.2.1 latest);

@@ -2,7 +2,10 @@
 <!-- Headless-Chrome sweep gate (see test/chrome/run.mjs).
      Self-contained: fetches ../wasm/swe.wasm, runs the interleaved
      sweep/natal integrity core from 12-sweep-gates plus an absolute
-     anchor check, then reports SWE-RESULT JSON in <title> and <body>. -->
+     anchor check, then POSTs SWE-RESULT JSON to /result?p=… and also
+     renders it in <title>/<body> for interactive runs. The HTTP
+     handshake (not --dump-dom) is the completion signal: deterministic,
+     race-free, and independent of Chrome helper processes holding stdio. -->
 <meta charset="utf-8">
 <title>SWE-RUNNING</title>
 <body><pre id="out">running…</pre></body>
@@ -113,4 +116,7 @@ try {
 const line = 'SWE-RESULT ' + JSON.stringify(res);
 document.title = line;
 document.getElementById('out').textContent = line;
+try {
+  await fetch('/result?p=' + encodeURIComponent(line));
+} catch { /* runner went away — nothing left to do */ }
 </script>
