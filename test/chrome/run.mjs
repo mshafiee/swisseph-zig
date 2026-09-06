@@ -7,6 +7,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -65,11 +66,16 @@ const server = createServer((req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const port = server.address().port;
 
+// Fresh profile per run: a shared default profile dir carries locks and
+// state between invocations (flaky empty dumps when a previous Chrome is
+// still releasing it).
+const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swe-chrome-'));
 const args = [
   '--headless=new',
   '--disable-gpu',
   '--no-first-run',
   '--no-default-browser-check',
+  `--user-data-dir=${profileDir}`,
   `--virtual-time-budget=60000`,
   '--dump-dom',
   `http://127.0.0.1:${port}/sweep.html`,
@@ -87,6 +93,7 @@ const out = await new Promise((resolve, reject) => {
   child.on('close', () => resolve(stdout + '\n' + stderr));
 });
 server.close();
+fs.rmSync(profileDir, { recursive: true, force: true });
 const m = out.match(/SWE-RESULT (\{.*\})/);
 if (!m) {
   console.error('chrome gate: no SWE-RESULT payload. output tail:');
