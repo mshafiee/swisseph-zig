@@ -18,6 +18,17 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # Proven chrome channel per OS: branded stable (DMG) crash-loops its
+        # helper processes on macOS CI (MachPortRendezvous IPC failure);
+        # the Chromium snapshot works there. Linux/Windows snapshots fail
+        # to render (no SWE-RESULT) while stable works on both.
+        include:
+          - os: ubuntu-latest
+            chrome_channel: stable
+          - os: macos-latest
+            chrome_channel: latest
+          - os: windows-latest
+            chrome_channel: stable
     runs-on: ${{ matrix.os }}
     # Backstop: the headless-Chrome wasm gate once hung a Windows runner
     # for 5h+ (helpers holding stdio pipes). 20 min is >5x the slowest
@@ -65,7 +76,7 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         id: chrome
         with:
-          chrome-version: stable
+          chrome-version: ${{ matrix.chrome_channel }}
       - name: WASM end-to-end (VFS, bit-exact vs native pure golden)
         shell: bash
         # Golden is Debug on purpose: optimized native codegen may fuse FMA
