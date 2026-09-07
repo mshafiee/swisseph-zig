@@ -40,7 +40,7 @@ const AS_MAXCH: usize = 256;
 /// Bridge ABI version. The TS bindings generator pins this: bump on any
 /// export signature/layout change so mismatched glue fails loudly.
 pub export fn swe_bridge_version() callconv(.c) i32 {
-    return 1;
+    return 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,14 +213,37 @@ pub export fn swe_get_planet_name(h: i32, ipl: i32, out_ptr: usize, out_len: usi
     return @intCast(n);
 }
 
-/// Stub: zeros outputs, returns 0.
-pub export fn swe_get_current_file_data(h: i32, ifno: i32, tfstart: *f64, tfend: *f64, denum: *i32) callconv(.c) i32 {
-    _ = h;
-    _ = ifno;
-    tfstart.* = 0;
-    tfend.* = 0;
-    denum.* = 0;
-    return 0;
+/// Pack-readiness probe (plan §6): reports the open ephemeris file's era
+/// span and DE number for `ifno` (0=sepl planets, 1=semo moon, 2/3=ast).
+/// Values come from the file header parsed by read_const, so a registered
+/// pack reads back exactly what the engine will use. ifno out of range →
+/// -2; era not loaded (fp null) → zeros + 0, letting the caller distinguish
+/// "absent, fetch it" from present data; -1 on bad handle. Null out
+/// pointers are allowed (probe the rc alone); the filename is written to
+/// fname_ptr (NUL-terminated, truncated to fname_len-1) when non-null.
+pub export fn swe_get_current_file_data(h: i32, ifno: i32, tfstart: ?*f64, tfend: ?*f64, denum: ?*i32, fname_ptr: usize, fname_len: usize) callconv(.c) i32 {
+    if (tfstart) |p| p.* = 0;
+    if (tfend) |p| p.* = 0;
+    if (denum) |p| p.* = 0;
+    const s = sessionOf(h) orelse return -1;
+    if (ifno < 0 or ifno >= sweph.SEI_NEPHFILES) return -2;
+    const fd = &s.swed.fidat[@intCast(ifno)];
+    // fp non-null but evicted/replaced underneath the session (era-swap
+    // primitive) reports as absent: the readiness state machine must see
+    // "fetch it", and the next engine read fails loudly instead of
+    // silently serving the dead handle.
+    if (fd.fp == null or !vfs.handleAlive(fd.fp)) return 0;
+    tfstart.?.* = fd.tfstart;
+    tfend.?.* = fd.tfend;
+    denum.?.* = fd.sweph_denum;
+    if (fname_ptr != 0 and fname_len > 0) {
+        const fnam = std.mem.sliceTo(&fd.fnam, 0);
+        const n = @min(fnam.len, fname_len - 1);
+        const dst: [*]u8 = @ptrFromInt(fname_ptr);
+        @memcpy(dst[0..n], fnam[0..n]);
+        dst[n] = 0;
+    }
+    return 1;
 }
 
 /// Stub: model hooks are test-only no-ops here.
@@ -582,6 +605,18 @@ pub export fn swe_vfs_register(name_ptr: ?[*]const u8, name_len: usize, data_ptr
 
 pub export fn swe_vfs_clear() callconv(.c) void {
     vfs.clear();
+}
+
+/// Evict one registered file by name (era-swap primitive): frees its bytes
+/// without disturbing other entries — text files (sefstars.txt, seorbel.txt)
+/// and unrelated era shards survive. A session holding an open handle on the
+/// evicted file fails loudly on its next read (file-damage diagnostic) and
+/// recovers on reopen (swe_close + recalc, or epheflag flip); never a silent
+/// wrong-file read. Returns 0 evicted, -1 not found, -3 bad name.
+pub export fn swe_vfs_evict(name_ptr: ?[*]const u8, name_len: usize) callconv(.c) i32 {
+    const np = name_ptr orelse return -3;
+    if (name_len == 0 or name_len >= vfs.MAX_NAME) return -3;
+    return vfs.evict(np[0..name_len]);
 }
 
 pub export fn swe_vfs_count() callconv(.c) i32 {

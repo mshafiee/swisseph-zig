@@ -38,10 +38,16 @@ const FileEntry = struct {
     name: [MAX_NAME]u8 = [_]u8{0} ** MAX_NAME, // NUL-terminated basename
     data: []u8 = &[_]u8{},
     used: bool = false,
+    // Bumped on every register (new or replace) and evict: stale handles
+    // (whose file was evicted or replaced bytes mid-read) fail the gen
+    // match in handleOf() and are treated as closed, instead of silently
+    // reading freed bytes or a slot the index got reused for.
+    gen: u32 = 0,
 };
 
 const Handle = struct {
     file: usize = 0,
+    gen: u32 = 0,
     cursor: usize = 0,
     used: bool = false,
 };
@@ -114,6 +120,7 @@ pub fn register(name: []const u8, data: []const u8) i32 {
             @memcpy(nd, data);
             ownedAllocator().free(f.data);
             f.data = nd;
+            f.gen +%= 1; // invalidate handles opened on the old bytes
             return 0;
         }
     }
@@ -125,10 +132,28 @@ pub fn register(name: []const u8, data: []const u8) i32 {
             f.name[base.len] = 0;
             f.data = nd;
             f.used = true;
+            f.gen +%= 1;
             return 0;
         }
     }
     return -2;
+}
+
+/// Evict one file by basename (era-swap primitive, plan §12 "VFS
+/// register/evict"): frees its bytes and marks the slot free, without
+/// touching other entries — text files (sefstars.txt, seorbel.txt) and
+/// unrelated era shards survive. Handles opened on the file die by
+/// generation mismatch (see FileEntry.gen), so a host that evicts a file
+/// a session still has open gets the engine's file-damage diagnostic on
+/// the next read, never a silent wrong-file read. Returns 0 evicted,
+/// -1 not found, -3 bad name.
+pub fn evict(name: []const u8) i32 {
+    const base = basenameOf(name);
+    if (base.len == 0 or base.len >= MAX_NAME) return -3;
+    const fi = findFile(base) orelse return -1;
+    ownedAllocator().free(files[fi].data);
+    files[fi] = .{ .gen = files[fi].gen +% 1 };
+    return 0;
 }
 
 pub fn clear() void {
@@ -163,7 +188,20 @@ fn handleOf(stream: ?*anyopaque) ?*Handle {
     if (idx == 0 or idx > MAX_HANDLES) return null;
     const h = &handles[idx - 1];
     if (!h.used) return null;
+    // generation gate: the file the handle was opened on must still exist
+    // with the same generation (evict/re-register invalidates)
+    if (h.file >= MAX_FILES) return null;
+    const f = &files[h.file];
+    if (!f.used or f.gen != h.gen) return null;
     return h;
+}
+
+/// Is this engine-held stream still backed by the file it was opened on?
+/// False after the file was evicted or its bytes replaced — used by the
+/// pack-readiness probe (swe_get_current_file_data) so a stale fidat.fp
+/// never reports an era as loaded when its pack is gone.
+pub fn handleAlive(stream: ?*anyopaque) bool {
+    return handleOf(stream) != null;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +213,7 @@ pub fn fopen(path: [*:0]const u8) ?*anyopaque {
     const fi = findFile(base) orelse return null;
     for (&handles, 0..) |*h, i| {
         if (!h.used) {
-            h.* = .{ .file = fi, .cursor = 0, .used = true };
+            h.* = .{ .file = fi, .gen = files[fi].gen, .cursor = 0, .used = true };
             return @ptrFromInt(i + 1);
         }
     }

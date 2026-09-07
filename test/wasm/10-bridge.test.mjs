@@ -37,8 +37,8 @@ describe('production bridge (swe.wasm session API)', () => {
     swe = await loadProduction();
   });
 
-  it('bridge version is 1', () => {
-    assert.equal(swe.exports.swe_bridge_version(), 1);
+  it('bridge version is 2 (v2: get_current_file_data + vfs_evict)', () => {
+    assert.equal(swe.exports.swe_bridge_version(), 2);
   });
 
   it('session lifecycle: 4 slots, exhaustion, reuse', () => {

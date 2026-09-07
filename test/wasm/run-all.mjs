@@ -21,8 +21,9 @@ const FILES = [
   'test/wasm/09-eop.test.mjs',
   'test/wasm/10-bridge.test.mjs',
   'test/wasm/12-sweep-gates.test.mjs',
+  'test/wasm/13-era-swap.test.mjs',
 ];
-const EXPECTED = { tests: 88, pass: 88, fail: 0 };
+const EXPECTED = { tests: 96, pass: 96, fail: 0 };
 
 const child = spawnSync(process.execPath, ['--test', ...FILES], {
   cwd: ROOT,

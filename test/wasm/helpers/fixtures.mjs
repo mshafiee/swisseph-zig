@@ -60,10 +60,11 @@ function crc32MsbFirst(buf) {
   return (~crc) >>> 0;
 }
 
-export function buildSepl18({ eol = '\r\n', longVersion = false } = {}) {
+export function buildSepl18({ eol = '\r\n', longVersion = false, tfstart = TFSTART, name = 'sepl_18.se1', coordShift = 0 } = {}) {
+  const tfend = tfstart + (TFEND - TFSTART);
   const vline = longVersion ? 'V' + 'A'.repeat(300) : 'SYNTHETIC SE1 V1';
   const text = Buffer.from(
-    vline + eol + 'sepl_18.se1' + eol + '(c) synthetic fixture for wasm VFS tests' + eol,
+    vline + eol + name + eol + '(c) synthetic fixture for wasm VFS tests' + eol,
     'latin1',
   );
   const perBodyConst = 4 + 1 + 1 + 4 + 80; // lndx0+iflg+ncoe+lng2+10xf64
@@ -81,8 +82,8 @@ export function buildSepl18({ eol = '\r\n', longVersion = false } = {}) {
   dv.setUint32(o, 0x00616263, true); o += 4; // testendian ("abc", LE host)
   dv.setInt32(o, total, true); o += 4; // flen self-length
   dv.setInt32(o, 431, true); o += 4; // DE number
-  dv.setFloat64(o, TFSTART, true); o += 8;
-  dv.setFloat64(o, TFEND, true); o += 8;
+  dv.setFloat64(o, tfstart, true); o += 8;
+  dv.setFloat64(o, tfend, true); o += 8;
   dv.setInt16(o, nBodies, true); o += 2; // nplan
   for (const [ipl] of BODIES) { dv.setInt16(o, ipl, true); o += 2; }
   const crcPos = o;
@@ -96,7 +97,7 @@ export function buildSepl18({ eol = '\r\n', longVersion = false } = {}) {
     buf[o++] = 0; // iflg: no reorder/ellipse/rotate
     buf[o++] = 2; // ncoe
     dv.setInt32(o, RMAX * 1000, true); o += 4; // lng2 -> rmax
-    for (const v of [TFSTART, TFEND, DSEG, 2451545.0, 0, 0, 0, 0, 0, 0]) {
+    for (const v of [tfstart, tfend, DSEG, 2451545.0, 0, 0, 0, 0, 0, 0]) {
       dv.setFloat64(o, v, true); o += 8;
     }
   });
@@ -108,10 +109,14 @@ export function buildSepl18({ eol = '\r\n', longVersion = false } = {}) {
       buf[o++] = off & 0xff; buf[o++] = (off >> 8) & 0xff; buf[o++] = (off >> 16) & 0xff;
     }
   });
-  BODIES.forEach(([, xyz]) => {
+  BODIES.forEach(([, xyz], bi) => {
+    // coordShift perturbs Mercury only: a uniform shift across all bodies
+    // cancels in the geocentric difference (Mercury − EMB − …) and the
+    // engine output would be invariant — useless for era-difference tests.
+    const shift = bi === 1 ? coordShift : 0;
     for (const v of xyz) {
       buf[o++] = 0x11; buf[o++] = 0x00; // nsize=[1,1,0,0], nco=2=ncoe
-      const L = encodeLong(v);
+      const L = encodeLong(v + shift);
       dv.setUint32(o, L >>> 0, true); o += 4; // group0: full u32 (c0)
       buf[o++] = 0; buf[o++] = 0; buf[o++] = 0; // group1: 3 bytes (c1=0)
     }
@@ -119,7 +124,7 @@ export function buildSepl18({ eol = '\r\n', longVersion = false } = {}) {
   if (o !== total) throw new Error(`segment layout drift: ${o} != ${total}`);
   // CRC covers [0..crcPos] (bytes before ulng), exactly like C's check area.
   dv.setUint32(crcPos, crc32MsbFirst(buf.subarray(0, crcPos)), true);
-  return { name: 'sepl_18.se1', bytes: buf, crcPos };
+  return { name, bytes: buf, crcPos, tfstart, tfend };
 }
 
 // Re-stamp the CRC after mutating bytes (mirrors what swephgen would emit).
