@@ -120,28 +120,29 @@ const port = server.address().port;
 // state between invocations (flaky empty dumps when a previous Chrome is
 // still releasing it).
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'swe-chrome-'));
+// Chrome's console goes to a FILE, not pipes: file handles inherited by
+// helper processes cannot hang a pipe-EOF wait (the Windows failure mode)
+// yet still preserve diagnostics for launch failures.
+const chromeLog = path.join(profileDir, 'chrome.log');
+const logFd = fs.openSync(chromeLog, 'w');
 const args = [
-  '--headless=new',
+  '--headless', // plain: 'new' headless is the default; newer builds reject the alias
+  '--no-sandbox', // required by snapshot/CI environments without user namespaces
   '--disable-gpu',
   '--disable-dev-shm-usage',
   '--no-first-run',
   '--no-default-browser-check',
+  '--disable-crash-reporter',
+  '--disable-breakpad',
   `--user-data-dir=${profileDir}`,
   `http://127.0.0.1:${port}/sweep.html`,
 ];
 // detached on POSIX so killTree can take down the whole process group.
-// stdio:'ignore' is load-bearing on Windows: Chrome's helper processes
-// inherit whatever handles the browser gets, and with piped stdio they
-// hold the runner's pipes open forever — the parent's spawnSync (and
-// any `close` wait) never sees EOF, which is exactly the multi-hour CI
-// hang. With no handles to inherit, waits are bounded. Chrome's own
-// console chatter isn't needed: the page reports results via HTTP and
-// its checks are printed from the payload below.
 // NOTE: async spawn, not spawnSync — the loopback server lives on this
 // process's event loop, which a synchronous wait would starve.
 const child = spawn(chrome, args, {
   detached: process.platform !== 'win32',
-  stdio: 'ignore',
+  stdio: ['ignore', logFd, logFd],
 });
 child.on('error', () => resolveClosed());
 child.on('close', () => resolveClosed());
@@ -158,14 +159,23 @@ clearTimeout(timer);
 killTree(child);
 await Promise.race([closedPromise, new Promise((r) => setTimeout(r, 5_000))]);
 server.close();
+fs.closeSync(logFd);
+// Grab Chrome's console/launch chatter BEFORE the profile dir is removed —
+// it makes the gate self-diagnosing on failure (browser-render failures,
+// missing shared libs, …). File handles cannot hang a pipe-EOF wait (the
+// Windows failure mode), so helpers inheriting them are harmless.
+let chromeLogTail = '';
+try {
+  const log = fs.readFileSync(chromeLog, 'utf8').trimEnd();
+  if (log) chromeLogTail = log.split('\n').slice(-30).join('\n');
+} catch { /* log unavailable */ }
 fs.rmSync(profileDir, { recursive: true, force: true });
 if (winner.kind !== 'result' || !winner.p) {
   const why = winner.kind === 'closed'
     ? 'Chrome exited before reporting a result'
     : 'timed out waiting for the page to report a result';
-  // Chrome's stdio is ignored (see spawn above), so there is no console
-  // tail to show — the page itself is the only output channel.
   console.error(`chrome gate: no SWE-RESULT payload (${why}).`);
+  console.error(chromeLogTail ? `chrome gate: chrome log tail:\n${chromeLogTail}` : 'chrome gate: chrome log is empty');
   process.exit(1);
 }
 let res;

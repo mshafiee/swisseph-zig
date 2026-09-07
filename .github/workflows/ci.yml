@@ -64,6 +64,8 @@ jobs:
       - name: Setup Chrome (headless sweep gate)
         uses: browser-actions/setup-chrome@v1
         id: chrome
+        with:
+          chrome-version: stable
       - name: WASM end-to-end (VFS, bit-exact vs native pure golden)
         shell: bash
         # Golden is Debug on purpose: optimized native codegen may fuse FMA
