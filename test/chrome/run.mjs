@@ -48,9 +48,26 @@ function findChrome() {
   ]) {
     if (fs.existsSync(p)) return p;
   }
+  // Windows: never launch chrome.exe just to probe — the GUI-subsystem
+  // launcher may print nothing for --version and block indefinitely
+  // (this was the 20-min CI hang). Locate via PATH scan instead.
+  if (process.platform === 'win32') {
+    for (const dir of (process.env.PATH ?? '').split(';')) {
+      if (!dir) continue;
+      for (const exe of ['chrome.exe', 'chromium.exe']) {
+        const p = path.join(dir.trim('"'), exe);
+        try {
+          if (fs.existsSync(p)) return p;
+        } catch { /* try next */ }
+      }
+    }
+    return null;
+  }
+  // POSIX: --version probe is reliable here, but bound it so a wedged
+  // binary can never stall the gate again.
   for (const b of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'chrome']) {
     try {
-      const r = spawnSync(b, ['--version'], { encoding: 'utf8' });
+      const r = spawnSync(b, ['--version'], { encoding: 'utf8', timeout: 10_000 });
       if (r.status === 0) return b;
     } catch { /* try next */ }
   }

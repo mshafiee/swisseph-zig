@@ -63,11 +63,14 @@ jobs:
           zig build libswe -Dtarget=wasm32-freestanding -Doptimize=ReleaseFast
       - name: Setup Chrome (headless sweep gate)
         uses: browser-actions/setup-chrome@v1
+        id: chrome
       - name: WASM end-to-end (VFS, bit-exact vs native pure golden)
         shell: bash
         # Golden is Debug on purpose: optimized native codegen may fuse FMA
         # (x86_64/ARM) while wasm has no FMA instruction; Debug is the
         # contraction-free bit-exact reference for the VFS comparisons.
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           zig build swe-golden -Doptimize=Debug -Dpure=true
           zig build wasm-test
